@@ -51,6 +51,9 @@ remain available as the conversation continues.
 | Command | Purpose |
 | --- | --- |
 | `/mcp` | Show server connection status, catalog sizes, and the loaded tool count. |
+| `/mcp inspect <server>` | Inspect status and configuration, including disabled servers. Connection values are hidden. |
+| `/mcp tools <server>` | Browse the server's tools and inspect descriptions without activating tools. |
+| `/mcp reload` | Apply configuration changes without restarting Pi. |
 | `/mcp auth <server>` | Authenticate an OAuth-enabled HTTP server. |
 | `/mcp reconnect <server>` | Replace a connection and refresh its catalog. |
 | `/mcp refresh <server>` | Refresh a server's catalog without loading additional tools. |
@@ -185,8 +188,21 @@ Every definition must include a `url` or `command`, even when `disabled` is true
 These options are specific to Pi MCP Client, not standardized MCP connection
 fields. Other clients may reject them when you copy a definition.
 
-Configuration changes take effect when Pi reloads the extension or starts a new
-session.
+After editing your configuration, run `/mcp reload` to apply it without restarting
+Pi. Reload validates the new configuration before replacing the current setup;
+invalid configuration leaves the previous setup intact. It closes existing
+connections, which reopen on demand, and deactivates tools from changed, removed,
+or disabled server definitions. Unchanged active tools remain available.
+
+Use `/mcp inspect <server>` to check the effective transport, protocol, filters,
+and connection status without connecting or running secret commands. Connection
+values—including commands, arguments, URLs, headers, and environment variables—
+are hidden because any of them can contain credentials.
+
+Use `/mcp tools <server>` to fetch the current catalog and browse a scrollable
+list. Select a tool to read its description. Browsing respects your include and
+exclude filters and doesn't activate tools or add their schemas to the assistant's
+context. This command requires an interactive UI.
 
 ### Discovery and caching
 

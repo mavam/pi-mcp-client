@@ -1,0 +1,15 @@
+---
+title: MCP server inspection, tool browsing, and reload
+type: feature
+authors:
+  - mavam
+created: 2026-09-07T16:32:19.444114Z
+---
+
+You can now inspect MCP servers, browse their tools, and apply configuration changes without restarting Pi:
+
+- `/mcp inspect <server>` shows the server's status and configuration, including disabled servers. Connection values stay hidden to protect credentials.
+- `/mcp tools <server>` opens a scrollable list of the server's tools. Select a tool to read its description without making it active for the assistant.
+- `/mcp reload` applies changes from your MCP configuration files. Invalid configuration leaves your current setup intact. Existing connections close and reopen on demand; tools from changed, removed, or disabled server definitions are deactivated, while unchanged active tools remain available.
+
+Tool browsing respects your configured tool filters and requires an interactive UI.

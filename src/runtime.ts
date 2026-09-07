@@ -478,9 +478,10 @@ export class McpRuntime {
     state.client = undefined;
     await this.catalog(name, undefined, true);
   }
-  status(): string {
+  status(server?: string): string {
     return (
       Object.entries(this.config)
+        .filter(([name]) => server === undefined || name === server)
         .map(([name, config]) => {
           const state = this.states.get(name);
           const status = config.disabled
