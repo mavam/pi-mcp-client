@@ -47,6 +47,12 @@ interface ServerState {
   error?: Diagnostic;
   warnings?: string[];
 }
+export interface ServerStatus {
+  name: string;
+  state: "disabled" | "connecting" | "failed" | "connected" | "disconnected";
+  catalogSize?: number;
+  error?: Diagnostic;
+}
 export class ToolContractError extends Error {}
 export interface Discovery {
   tools: CatalogTool[];
@@ -478,24 +484,28 @@ export class McpRuntime {
     state.client = undefined;
     await this.catalog(name, undefined, true);
   }
-  status(): string {
-    return (
-      Object.entries(this.config)
-        .map(([name, config]) => {
-          const state = this.states.get(name);
-          const status = config.disabled
-            ? "disabled"
-            : state?.connecting || state?.listing
-              ? "connecting"
-              : state?.error
-                ? formatDiagnostic({ ...state.error, server: undefined })
-                : state?.client
-                  ? "connected"
-                  : "disconnected";
-          return `${name}: ${status} · ${state?.tools?.length ?? "unknown"} catalog tools`;
-        })
-        .join("\n") || "No MCP servers configured."
-    );
+  serverStatuses(): ServerStatus[] {
+    return Object.entries(this.config).map(([name, config]) => {
+      const state = this.states.get(name);
+      return {
+        name,
+        state: config.disabled ? "disabled"
+          : state?.connecting || state?.listing ? "connecting"
+          : state?.error ? "failed"
+          : state?.client ? "connected" : "disconnected",
+        catalogSize: state?.tools?.length,
+        error: state?.error,
+      };
+    });
+  }
+  status(server?: string): string {
+    return this.serverStatuses()
+      .filter(({ name }) => server === undefined || name === server)
+      .map((row) => {
+        const status = row.state === "failed" && row.error
+          ? formatDiagnostic({ ...row.error, server: undefined }) : row.state;
+        return `${row.name}: ${status} · ${row.catalogSize ?? "unknown"} catalog tools`;
+      }).join("\n") || "No MCP servers configured.";
   }
   close(): Promise<void> {
     return (this.closing ??= this.shutdown());

@@ -6,8 +6,15 @@ import {
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { loadConfig, allowed, object, type Config } from "./config.js";
-import { DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT, line, searchTools, type CatalogTool } from "./catalog.js";
+import { loadConfig, resolveServer, allowed, object, type Config } from "./config.js";
+import { inspectServer, inspectTool, serverMatrix, toolPickerLabel } from "./management.js";
+import {
+  DEFAULT_SEARCH_LIMIT,
+  MAX_SEARCH_LIMIT,
+  line,
+  searchTools,
+  type CatalogTool,
+} from "./catalog.js";
 import { authenticate } from "./auth.js";
 import { McpRuntime, ToolContractError } from "./runtime.js";
 import { Exposure, restoredTools, SEARCH_TOOL } from "./exposure.js";
@@ -52,6 +59,7 @@ export default function mcpClient(
   let runtime: McpRuntime | undefined;
   let config: Config = {};
   let configError: DiagnosticError | undefined;
+  let sessionGeneration = 0;
   const exposure = new Exposure(pi, registerNative);
   const current = () => {
     if (!runtime)
@@ -122,28 +130,60 @@ export default function mcpClient(
     exposure.restore(tools);
   };
 
+  async function reloadConfiguration(ctx: ExtensionContext) {
+    // Validate before replacing a working setup. Secret commands stay lazy.
+    const generation = sessionGeneration;
+    ctx.signal?.throwIfAborted();
+    const nextConfig = await loadConfig(agentDir, ctx.cwd, ctx.isProjectTrusted());
+    ctx.signal?.throwIfAborted();
+    if (generation !== sessionGeneration)
+      throw new CommandUsageError("The Pi session changed during configuration reload.");
+    for (const definition of Object.values(nextConfig)) {
+      if (!definition.disabled) resolveServer(definition, ctx.cwd);
+    }
+    const next = new McpRuntime(
+      nextConfig,
+      ctx.cwd,
+      join(agentDir, "cache", "pi-mcp-client"),
+    );
+    const active = new Set(pi.getActiveTools());
+    const retained = [...exposure.definitions.values()].filter((tool) => {
+      try {
+        return (
+          active.has(tool.nativeName) &&
+          next.identity(tool.server) === tool.identity &&
+          allowed(tool.name, nextConfig[tool.server])
+        );
+      } catch {
+        return false;
+      }
+    });
+    const old = runtime;
+    config = nextConfig;
+    configError = undefined;
+    runtime = next;
+    exposure.restore(retained);
+    await old?.close();
+  }
+
   pi.on("session_start", async (_event, ctx) => {
+    sessionGeneration++;
     await runtime?.close();
     runtime = undefined;
     config = {};
     configError = undefined;
     try {
       config = await loadConfig(agentDir, ctx.cwd, ctx.isProjectTrusted());
-      runtime = new McpRuntime(
-        config,
-        ctx.cwd,
-        join(agentDir, "cache", "pi-mcp-client"),
-      );
+      runtime = new McpRuntime(config, ctx.cwd, join(agentDir, "cache", "pi-mcp-client"));
     } catch (error) {
-      configError = new DiagnosticError(
-        diagnose(error, { operation: "configuration" }),
-      );
+      configError = new DiagnosticError(diagnose(error, { operation: "configuration" }));
       if (ctx.hasUI) ctx.ui.notify(configError.message, "error");
     }
     restore(ctx);
   });
   pi.on("session_tree", (_event, ctx) => restore(ctx));
   pi.on("session_shutdown", async () => {
+    sessionGeneration++;
     const old = runtime;
     runtime = undefined;
     await old?.close();
@@ -182,19 +222,24 @@ export default function mcpClient(
         query: Type.String({
           minLength: 1,
           maxLength: 500,
-          description: "One focused capability or exact server.tool name, for example linear.list_teams. Do not enumerate every capability of a server.",
+          description:
+            "One focused capability or exact server.tool name, for example linear.list_teams. Do not enumerate every capability of a server.",
         }),
-        server: Type.Optional(Type.String({
-          minLength: 1,
-          maxLength: 80,
-          description: "Restrict discovery to this configured MCP server.",
-        })),
-        limit: Type.Optional(Type.Integer({
-          minimum: 1,
-          maximum: MAX_SEARCH_LIMIT,
-          default: DEFAULT_SEARCH_LIMIT,
-          description: `Maximum number of tools to load: 1–${MAX_SEARCH_LIMIT} inclusive (default: ${DEFAULT_SEARCH_LIMIT}). This is not a limit on records returned by a native tool. Omit unless more tools are needed.`,
-        })),
+        server: Type.Optional(
+          Type.String({
+            minLength: 1,
+            maxLength: 80,
+            description: "Restrict discovery to this configured MCP server.",
+          }),
+        ),
+        limit: Type.Optional(
+          Type.Integer({
+            minimum: 1,
+            maximum: MAX_SEARCH_LIMIT,
+            default: DEFAULT_SEARCH_LIMIT,
+            description: `Maximum number of tools to load: 1–${MAX_SEARCH_LIMIT} inclusive (default: ${DEFAULT_SEARCH_LIMIT}). This is not a limit on records returned by a native tool. Omit unless more tools are needed.`,
+          }),
+        ),
       },
       { additionalProperties: false },
     ),
@@ -225,12 +270,7 @@ export default function mcpClient(
         (signal ?? ctx.signal)?.throwIfAborted();
         if (runtime !== activeRuntime)
           throw new Error("MCP session changed during search.");
-        const matches = searchTools(
-          discovery.tools,
-          args.query,
-          args.server,
-          args.limit,
-        );
+        const matches = searchTools(discovery.tools, args.query, args.server, args.limit);
         const { loaded, added, rejected } = exposure.load(matches);
         const messages = loaded.map(
           (tool) =>
@@ -289,12 +329,18 @@ export default function mcpClient(
   });
 
   pi.registerCommand("mcp", {
-    description: "Inspect MCP servers; /mcp auth|reconnect|refresh <server>",
+    description:
+      "Manage MCP servers: list, status, reload, inspect|tools|auth|reconnect|refresh <server>",
     getArgumentCompletions(prefix) {
       const values = [
         "status",
-        ...["auth", "reconnect", "refresh"].flatMap((action) =>
-          Object.keys(config).map((name) => `${action} ${name}`),
+        "list",
+        "reload",
+        ...["inspect", "tools", "auth", "reconnect", "refresh"].flatMap((action) =>
+          Object.keys(config)
+            .filter((name) => action === "inspect" || !config[name].disabled)
+            .sort()
+            .map((name) => `${action} ${name}`),
         ),
       ];
       return values
@@ -308,15 +354,36 @@ export default function mcpClient(
         .split(/\s+/)
         .filter(Boolean);
       try {
-        if (action === "status" && !server) {
-          const loaded = pi
-            .getActiveTools()
-            .filter((name) => exposure.definitions.has(name)).length;
+        if (action === "reload" && !server) {
+          await reloadConfiguration(ctx);
           if (ctx.hasUI)
             ctx.ui.notify(
-              `${current().status()}\n${loaded} native MCP tools loaded.`,
+              "✔︎ MCP configuration reloaded. Connections reopen on demand; tools from changed or removed servers are no longer active.",
               "info",
             );
+          return;
+        }
+        if (
+          action === "inspect" &&
+          server &&
+          !extra.length &&
+          Object.hasOwn(config, server)
+        ) {
+          if (ctx.hasUI)
+            ctx.ui.notify(
+              inspectServer(server, config[server], current().status(server)),
+              "info",
+            );
+          return;
+        }
+        if ((action === "status" || action === "list") && !server) {
+          const statuses = current().serverStatuses();
+          const loaded = new Map<string, number>();
+          for (const name of pi.getActiveTools()) {
+            const tool = exposure.definitions.get(name);
+            if (tool) loaded.set(tool.server, (loaded.get(tool.server) ?? 0) + 1);
+          }
+          if (ctx.hasUI) ctx.ui.notify(serverMatrix(statuses, loaded), "info");
           return;
         }
         if (
@@ -326,8 +393,35 @@ export default function mcpClient(
           config[server].disabled
         )
           throw new CommandUsageError(
-            "Usage: /mcp auth|reconnect|refresh <enabled-server>",
+            "Usage: /mcp list|status|reload or /mcp inspect|tools|auth|reconnect|refresh <server>. Only inspect accepts a disabled server.",
           );
+        if (action === "tools") {
+          if (!ctx.hasUI)
+            throw new CommandUsageError("Tool browsing requires an interactive UI.");
+          const tools = await current().catalog(server, ctx.signal, true);
+          if (!tools.length) {
+            ctx.ui.notify(
+              `${server}: no tools available under the configured filters.`,
+              "info",
+            );
+            return;
+          }
+          const choices = [...tools].sort((a, b) => a.name.localeCompare(b.name));
+          const columns = ctx.mode === "tui" ? process.stdout.columns || 80 : 80;
+          const labels = choices.map((tool, index) => toolPickerLabel(tool, index, columns));
+          const selected = await ctx.ui.select(
+            `${server}: ${tools.length} tools (select to inspect; none are activated)`,
+            labels,
+          );
+          const tool =
+            selected === undefined ? undefined : choices[labels.indexOf(selected)];
+          if (tool)
+            ctx.ui.notify(
+              inspectTool(tool),
+              "info",
+            );
+          return;
+        }
         if (action === "auth") {
           if (!ctx.hasUI)
             throw new CommandUsageError(
@@ -375,15 +469,14 @@ export default function mcpClient(
           } else await authenticate(url, open, ctx.signal);
           await current().reconnect(server);
         } else if (action === "reconnect") await current().reconnect(server);
-        else if (action === "refresh")
-          await current().catalog(server, ctx.signal, true);
+        else if (action === "refresh") await current().catalog(server, ctx.signal, true);
         else
           throw new CommandUsageError(
-            "Unknown MCP command. Use /mcp auth|reconnect|refresh <server>.",
+            "Unknown MCP command. Use /mcp list|status|reload or /mcp inspect|tools|auth|reconnect|refresh <server>.",
           );
         if (ctx.hasUI)
           ctx.ui.notify(
-            `${server}: ${action} complete. Search to load new or changed tools.`,
+            `✔︎ ${server}: ${action} complete. Updated tools are available for the assistant to discover.`,
             "info",
           );
       } catch (error) {
@@ -394,16 +487,21 @@ export default function mcpClient(
                 diagnose(error, {
                   server,
                   operation:
-                    action === "auth"
-                      ? "auth"
-                      : action === "refresh"
-                        ? "refresh"
-                        : "reconnect",
+                    action === "reload" || action === "inspect"
+                      ? "configuration"
+                      : action === "tools"
+                        ? "search"
+                        : action === "auth"
+                          ? "auth"
+                          : action === "refresh"
+                            ? "refresh"
+                            : "reconnect",
                   oauth: config[server]?.oauth,
                   signal: ctx.signal,
                 }),
               );
         if (ctx.hasUI) ctx.ui.notify(message, "error");
+        else throw new Error(message);
       }
     },
   });

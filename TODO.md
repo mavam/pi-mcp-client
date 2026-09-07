@@ -27,8 +27,9 @@ not every server or client needs all of them.
 
 ## High priority: everyday client management
 
-- [ ] **Server management:** Add inspect, enable/disable, and reload actions without
-  restarting Pi; close obsolete connections and reconcile loaded tool identities.
+- [x] **Server inspection and reload:** Inspect servers, browse tools, and reload
+  configuration without restarting Pi; close connections and reconcile loaded tools.
+- [ ] **Server enable/disable commands:** Toggle servers without editing configuration.
 - [ ] **Configuration imports:** Offer explicit, previewable imports from Claude,
   Cursor, VS Code, Codex, and MCPorter. Never silently merge credentials or execute
   imported commands.
