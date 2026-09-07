@@ -102,8 +102,46 @@ test("inspect includes disabled servers and never resolves or exposes connection
   expect(remote).toContain("Headers: 1");
   expect(remote).not.toContain("secret-");
   expect(h.commands.get("mcp").getArgumentCompletions("inspect p")).toEqual([
-    { value: "inspect private", label: "inspect private" },
+    { value: "inspect private", label: "private" },
   ]);
+});
+
+test("command completion suggests actions first and servers only after an action", async () => {
+  const h = await host(JSON.stringify({ mcpServers: {
+    linear: fixtureServer,
+    cloudflare: fixtureServer,
+    disabled: { ...fixtureServer, disabled: true },
+  } }));
+  const complete = h.commands.get("mcp").getArgumentCompletions;
+  expect(complete("")).toEqual(
+    ["list", "status", "reload", "inspect", "tools", "auth", "reconnect", "refresh"]
+      .map((value) => ({ value, label: value })),
+  );
+  expect(complete("to")).toEqual([{ value: "tools", label: "tools" }]);
+  expect(complete("tools")).toEqual([{ value: "tools", label: "tools" }]);
+  for (const action of ["tools", "auth", "reconnect", "refresh"]) {
+    expect(complete(`${action} `)).toEqual([
+      { value: `${action} cloudflare`, label: "cloudflare" },
+      { value: `${action} linear`, label: "linear" },
+    ]);
+  }
+  expect(complete("tools li")).toEqual([{ value: "tools linear", label: "linear" }]);
+  expect(complete("  tools   li")).toEqual(complete("tools li"));
+  expect(complete("inspect d")).toEqual([{ value: "inspect disabled", label: "disabled" }]);
+  for (const input of ["reload ", "list ", "status ", "unknown ", "tools missing", "tools linear "])
+    expect(complete(input)).toEqual([]);
+  expect(h.activeTools()).toEqual(["mcp_search"]);
+  expect(h.notifications).toEqual([]);
+});
+
+test("command completion reflects configuration reloads and works without servers", async () => {
+  const h = await host(JSON.stringify({ mcpServers: {} }));
+  const complete = h.commands.get("mcp").getArgumentCompletions;
+  expect(complete("tools")).toEqual([{ value: "tools", label: "tools" }]);
+  expect(complete("tools ")).toEqual([]);
+  await writeFile(join(h.directory, "mcp.json"), JSON.stringify({ mcpServers: { linear: fixtureServer } }));
+  await h.command("reload");
+  expect(complete("tools ")).toEqual([{ value: "tools linear", label: "linear" }]);
 });
 
 test("tool browsing lists filtered tools without activating any", async () => {
