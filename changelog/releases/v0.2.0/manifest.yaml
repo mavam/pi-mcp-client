@@ -1,0 +1,10 @@
+created: 2026-09-07
+title: MCP server inspection and live configuration management
+intro: >-
+  Pi now makes MCP servers easier to understand and manage without restarting: inspect
+  server status and configuration, browse tool signatures, reload configuration safely,
+  and discover catalog changes as they happen. Compact command completion keeps the
+  /mcp menu focused while preserving access to every configured server.
+source:
+  mode: sync-stable-queue
+  previous_stable: v0.1.0
