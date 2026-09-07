@@ -143,7 +143,7 @@ test("reload retains unchanged active definitions and unrelated tools, but not i
   expect(h.activeTools()).toEqual(["mcp_search", "unrelated", echo]);
   expect(h.activeTools()).not.toContain(fail);
   await h.command("status");
-  expect(h.notifications.at(-1)).toContain("disconnected");
+  expect(h.notifications.at(-1)).toContain("idle");
   const result = await h.execute(echo, { text: "after reload" });
   expect(JSON.stringify(result.content)).toContain("after reload");
 });
@@ -231,6 +231,33 @@ test("empty tool catalogs, picker cancellation, and headless browsing don't acti
   h.ctx.hasUI = false;
   await expect(h.command("tools example")).rejects.toThrow("interactive UI");
   expect(h.activeTools()).toEqual(["mcp_search"]);
+});
+
+test("list and status show the same matrix without connecting or loading tools", async () => {
+  const h = await host(JSON.stringify({ mcpServers: { example: fixtureServer } }));
+  await h.command("list");
+  const listing = h.notifications.at(-1)!;
+  expect(listing).toContain("○ example");
+  expect(listing).toContain("idle");
+  expect(listing).not.toContain("unknown catalog tools");
+  expect(listing).toContain("Connections open on demand");
+  await h.command("status");
+  expect(h.notifications.at(-1)).toBe(listing);
+  expect(h.activeTools()).toEqual(["mcp_search"]);
+  await h.execute("mcp_search", { query: "example.echo" });
+  await h.command("list");
+  expect(h.notifications.at(-1)).toContain("✔︎ example");
+  expect(h.notifications.at(-1)).toMatch(/connected\s+2\s+1/);
+});
+
+test("successful management actions use checkmark notifications", async () => {
+  const h = await host(JSON.stringify({ mcpServers: { example: fixtureServer } }));
+  for (const action of ["refresh example", "reconnect example", "reload"]) {
+    await h.command(action);
+    expect(h.notifications.at(-1)).toStartWith("✔︎ ");
+    expect(h.notifications.at(-1)).not.toContain("mcp_search");
+    expect(h.notifications.at(-1)).not.toContain("Search to load");
+  }
 });
 
 test("cancelled reloads do not replace the current configuration", async () => {

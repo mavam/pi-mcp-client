@@ -50,13 +50,19 @@ remain available as the conversation continues.
 
 | Command | Purpose |
 | --- | --- |
-| `/mcp` | Show server connection status, catalog sizes, and the loaded tool count. |
+| `/mcp`, `/mcp list`, `/mcp status` | Show a server status matrix with catalog and loaded-tool counts. |
 | `/mcp inspect <server>` | Inspect status and configuration, including disabled servers. Connection values are hidden. |
 | `/mcp tools <server>` | Browse the server's tools and inspect descriptions without activating tools. |
 | `/mcp reload` | Apply configuration changes without restarting Pi. |
 | `/mcp auth <server>` | Authenticate an OAuth-enabled HTTP server. |
 | `/mcp reconnect <server>` | Replace a connection and refresh its catalog. |
 | `/mcp refresh <server>` | Refresh a server's catalog without loading additional tools. |
+
+The status matrix uses glyphs to distinguish idle (`○`), connected (`✔︎`),
+connecting (`▶︎`), disabled (`■`), and failed (`✘︎`) servers. Idle is normal:
+connections open on demand. A dash (`—`) means the catalog hasn't been fetched,
+not that the server has no tools. The **Loaded** column counts tools currently
+active for the assistant.
 
 After refreshing a changed schema, search for the tool again to load its current
 definition. Calls validate the live catalog before execution and refuse removed

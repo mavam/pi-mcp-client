@@ -7,7 +7,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { loadConfig, resolveServer, allowed, object, type Config } from "./config.js";
-import { inspectServer } from "./management.js";
+import { inspectServer, serverMatrix } from "./management.js";
 import {
   DEFAULT_SEARCH_LIMIT,
   MAX_SEARCH_LIMIT,
@@ -330,10 +330,11 @@ export default function mcpClient(
 
   pi.registerCommand("mcp", {
     description:
-      "Manage MCP servers: status, reload, inspect|tools|auth|reconnect|refresh <server>",
+      "Manage MCP servers: list, status, reload, inspect|tools|auth|reconnect|refresh <server>",
     getArgumentCompletions(prefix) {
       const values = [
         "status",
+        "list",
         "reload",
         ...["inspect", "tools", "auth", "reconnect", "refresh"].flatMap((action) =>
           Object.keys(config)
@@ -357,7 +358,7 @@ export default function mcpClient(
           await reloadConfiguration(ctx);
           if (ctx.hasUI)
             ctx.ui.notify(
-              "MCP configuration reloaded. Connections reopen on demand; tools from changed or removed servers are no longer active.",
+              "✔︎ MCP configuration reloaded. Connections reopen on demand; tools from changed or removed servers are no longer active.",
               "info",
             );
           return;
@@ -375,15 +376,14 @@ export default function mcpClient(
             );
           return;
         }
-        if (action === "status" && !server) {
-          const loaded = pi
-            .getActiveTools()
-            .filter((name) => exposure.definitions.has(name)).length;
-          if (ctx.hasUI)
-            ctx.ui.notify(
-              `${current().status()}\n${loaded} native MCP tools loaded.`,
-              "info",
-            );
+        if ((action === "status" || action === "list") && !server) {
+          const statuses = current().serverStatuses();
+          const loaded = new Map<string, number>();
+          for (const name of pi.getActiveTools()) {
+            const tool = exposure.definitions.get(name);
+            if (tool) loaded.set(tool.server, (loaded.get(tool.server) ?? 0) + 1);
+          }
+          if (ctx.hasUI) ctx.ui.notify(serverMatrix(statuses, loaded), "info");
           return;
         }
         if (
@@ -393,7 +393,7 @@ export default function mcpClient(
           config[server].disabled
         )
           throw new CommandUsageError(
-            "Usage: /mcp status|reload or /mcp inspect|tools|auth|reconnect|refresh <server>. Only inspect accepts a disabled server.",
+            "Usage: /mcp list|status|reload or /mcp inspect|tools|auth|reconnect|refresh <server>. Only inspect accepts a disabled server.",
           );
         if (action === "tools") {
           if (!ctx.hasUI)
@@ -473,11 +473,11 @@ export default function mcpClient(
         else if (action === "refresh") await current().catalog(server, ctx.signal, true);
         else
           throw new CommandUsageError(
-            "Unknown MCP command. Use /mcp status|reload or /mcp inspect|tools|auth|reconnect|refresh <server>.",
+            "Unknown MCP command. Use /mcp list|status|reload or /mcp inspect|tools|auth|reconnect|refresh <server>.",
           );
         if (ctx.hasUI)
           ctx.ui.notify(
-            `${server}: ${action} complete. Search to load new or changed tools.`,
+            `✔︎ ${server}: ${action} complete. Updated tools are available for the assistant to discover.`,
             "info",
           );
       } catch (error) {
