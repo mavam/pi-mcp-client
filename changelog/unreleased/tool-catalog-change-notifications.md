@@ -3,7 +3,9 @@ title: Tool catalog change notifications
 type: feature
 authors:
   - mavam
-created: 2026-09-07T15:58:51.840874Z
+prs:
+  - 1
+created: 2026-09-07T16:01:34.792486Z
 ---
 
 Search now refreshes the tool catalog after a connected MCP server reports a change, so newly added tools become discoverable and removed tools no longer appear in search results.
