@@ -1,0 +1,8 @@
+created: 2026-09-07
+title: Introducing Pi MCP Client
+intro: >-
+  Pi MCP Client connects Pi to local and remote MCP servers, discovering tools on
+  demand and calling them natively. Authenticate with OAuth or your existing credentials,
+  and keep discovered tools available as your conversation continues.
+source:
+  mode: sync-stable-queue
