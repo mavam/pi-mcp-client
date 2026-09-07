@@ -7,7 +7,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { loadConfig, resolveServer, allowed, object, type Config } from "./config.js";
-import { inspectServer, serverMatrix } from "./management.js";
+import { inspectServer, inspectTool, serverMatrix, toolPickerLabel } from "./management.js";
 import {
   DEFAULT_SEARCH_LIMIT,
   MAX_SEARCH_LIMIT,
@@ -407,9 +407,8 @@ export default function mcpClient(
             return;
           }
           const choices = [...tools].sort((a, b) => a.name.localeCompare(b.name));
-          const labels = choices.map(
-            (tool, index) => `${index + 1}. ${line(tool.name).slice(0, 160)}`,
-          );
+          const columns = ctx.mode === "tui" ? process.stdout.columns || 80 : 80;
+          const labels = choices.map((tool, index) => toolPickerLabel(tool, index, columns));
           const selected = await ctx.ui.select(
             `${server}: ${tools.length} tools (select to inspect; none are activated)`,
             labels,
@@ -418,7 +417,7 @@ export default function mcpClient(
             selected === undefined ? undefined : choices[labels.indexOf(selected)];
           if (tool)
             ctx.ui.notify(
-              `${line(tool.name)}\n${line(tool.description).slice(0, 4000) || "No description."}`,
+              inspectTool(tool),
               "info",
             );
           return;

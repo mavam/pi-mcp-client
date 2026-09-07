@@ -58,8 +58,8 @@ remain available as the conversation continues.
 | `/mcp reconnect <server>` | Replace a connection and refresh its catalog. |
 | `/mcp refresh <server>` | Refresh a server's catalog without loading additional tools. |
 
-The status matrix uses glyphs to distinguish idle (`○`), connected (`✔︎`),
-connecting (`▶︎`), disabled (`■`), and failed (`✘︎`) servers. Idle is normal:
+The status matrix uses glyphs to distinguish idle (`○`), connected (`●`),
+connecting (`▶︎`), disabled (`○`), and failed (`✘︎`) servers. Idle is normal:
 connections open on demand. A dash (`—`) means the catalog hasn't been fetched,
 not that the server has no tools. The **Loaded** column counts tools currently
 active for the assistant.
@@ -206,7 +206,9 @@ values—including commands, arguments, URLs, headers, and environment variables
 are hidden because any of them can contain credentials.
 
 Use `/mcp tools <server>` to fetch the current catalog and browse a scrollable
-list. Select a tool to read its description. Browsing respects your include and
+list. Each row shows the tool name and description, trimmed to the terminal width
+with an ellipsis. Select a tool to see a multiline signature and parameter details,
+with each parameter in a separate paragraph. Browsing respects your include and
 exclude filters and doesn't activate tools or add their schemas to the assistant's
 context. This command requires an interactive UI.
 

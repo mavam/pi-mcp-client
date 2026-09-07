@@ -114,8 +114,9 @@ test("tool browsing lists filtered tools without activating any", async () => {
     return values[0];
   };
   await h.command("tools example");
-  expect(choices).toEqual(["1. echo", "2. fail"]);
+  expect(choices).toEqual(["1. echo: Echo text", "2. fail: Return a tool failure"]);
   expect(h.notifications.at(-1)).toContain("Echo text");
+  expect(h.notifications.at(-1)).toContain("text: string (required)");
   expect(h.activeTools()).toEqual(["mcp_search"]);
   expect([...h.tools.keys()]).toEqual(["mcp_search"]);
   await writeFile(
@@ -128,7 +129,7 @@ test("tool browsing lists filtered tools without activating any", async () => {
   );
   await h.command("reload");
   await h.command("tools example");
-  expect(choices).toEqual(["1. echo"]);
+  expect(choices).toEqual(["1. echo: Echo text"]);
   expect(h.activeTools()).toEqual(["mcp_search"]);
 });
 
@@ -246,7 +247,7 @@ test("list and status show the same matrix without connecting or loading tools",
   expect(h.activeTools()).toEqual(["mcp_search"]);
   await h.execute("mcp_search", { query: "example.echo" });
   await h.command("list");
-  expect(h.notifications.at(-1)).toContain("✔︎ example");
+  expect(h.notifications.at(-1)).toContain("● example");
   expect(h.notifications.at(-1)).toMatch(/connected\s+2\s+1/);
 });
 
