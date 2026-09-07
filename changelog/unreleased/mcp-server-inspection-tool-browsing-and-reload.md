@@ -3,7 +3,9 @@ title: MCP server inspection, tool browsing, and reload
 type: feature
 authors:
   - mavam
-created: 2026-09-07T16:32:19.444114Z
+prs:
+  - 2
+created: 2026-09-07T16:34:40.787923Z
 ---
 
 You can now inspect MCP servers, browse their tools, and apply configuration changes without restarting Pi:
