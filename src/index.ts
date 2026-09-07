@@ -332,20 +332,24 @@ export default function mcpClient(
     description:
       "Manage MCP servers: list, status, reload, inspect|tools|auth|reconnect|refresh <server>",
     getArgumentCompletions(prefix) {
-      const values = [
-        "status",
-        "list",
-        "reload",
-        ...["inspect", "tools", "auth", "reconnect", "refresh"].flatMap((action) =>
-          Object.keys(config)
-            .filter((name) => action === "inspect" || !config[name].disabled)
-            .sort()
-            .map((name) => `${action} ${name}`),
-        ),
-      ];
-      return values
-        .filter((value) => value.startsWith(prefix))
-        .map((value) => ({ value, label: value }));
+      const serverActions = ["inspect", "tools", "auth", "reconnect", "refresh"];
+      const input = prefix.trimStart();
+      const match = /^(\S+)\s+(.*)$/s.exec(input);
+      if (!match) {
+        return ["list", "status", "reload", ...serverActions]
+          .filter((action) => action.startsWith(input))
+          .map((action) => ({ value: action, label: action }));
+      }
+      const [, action, partialServer] = match;
+      if (!serverActions.includes(action) || /\s/.test(partialServer)) return [];
+      return Object.keys(config)
+        .filter((name) =>
+          name.startsWith(partialServer) &&
+          (action === "inspect" || !config[name].disabled),
+        )
+        .sort()
+        // Pi replaces the complete argument prefix, not just the server token.
+        .map((name) => ({ value: `${action} ${name}`, label: name }));
     },
     async handler(args, ctx) {
       await ctx.waitForIdle();
