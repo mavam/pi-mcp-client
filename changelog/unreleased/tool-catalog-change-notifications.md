@@ -5,9 +5,9 @@ authors:
   - mavam
 prs:
   - 1
-created: 2026-09-07T16:01:34.792486Z
+created: 2026-09-07T16:24:06.58629Z
 ---
 
-Search now refreshes the tool catalog after a connected MCP server reports a change, so newly added tools become discoverable and removed tools no longer appear in search results.
+Pi now notices when a connected MCP server adds, removes, or changes its tools and refreshes its catalog the next time the assistant searches for tools. Previously, searches could miss newly added tools or keep showing tools that were no longer available.
 
-Notifications don't silently replace active tool definitions. If a tool's schema changes, run `mcp_search` again to load its current definition before calling it. Cache-only searches without a live connection still use the existing 24-hour expiry.
+Tools already in use aren't silently changed. If a server changes a tool's expected inputs, calls using the old definition are blocked until the assistant discovers the updated tool.
