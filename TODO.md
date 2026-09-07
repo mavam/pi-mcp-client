@@ -14,9 +14,10 @@ not every server or client needs all of them.
   explicit user selection. Treat prompt content as untrusted server data.
 - [ ] **Roots:** Advertise explicitly authorized workspace roots and notify servers
   when they change. Roots are scope hints, not a filesystem sandbox.
-- [ ] **Catalog notifications:** Handle `tools/list_changed` and invalidate stale
-  catalogs without silently replacing an active tool contract. Extend notification
-  handling to resources and prompts when those capabilities are implemented.
+- [x] **Tool catalog notifications:** Handle `tools/list_changed` and invalidate
+  stale catalogs without silently replacing an active tool contract.
+- [ ] **Resource and prompt catalog notifications:** Extend notification handling
+  when those capabilities are implemented.
 - [ ] **OAuth interoperability:** Support pre-registered clients and additional
   client-registration mechanisms where supported by the SDK and server. Preserve
   issuer binding and OS-backed credential storage.
