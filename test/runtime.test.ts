@@ -4,23 +4,45 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
-import { McpServer } from "@modelcontextprotocol/server";
+import { McpServer, createMcpHandler } from "@modelcontextprotocol/server";
+import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import * as z from "zod/v4";
-import { McpRuntime, waitFor, type ConnectFactory } from "../src/runtime.js";
+import {
+  McpRuntime,
+  connectSdk,
+  waitFor,
+  type ConnectFactory,
+} from "../src/runtime.js";
 
 const cleanup: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
   for (const fn of cleanup.splice(0).reverse()) await fn();
 });
+async function eventually(predicate: () => boolean | Promise<boolean>) {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    if (await predicate()) return;
+    await Bun.sleep(5);
+  }
+  throw new Error("Condition did not become true");
+}
 async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), "mcp-test-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   let connects = 0;
   let calls = 0;
   const handles: ReturnType<McpServer["registerTool"]>[] = [];
-  const connect: ConnectFactory = async () => {
+  const servers: McpServer[] = [];
+  const clients: Client[] = [];
+  const notifications: (() => void)[] = [];
+  const connect: ConnectFactory = async (
+    _name,
+    config,
+    _signal,
+    onToolsChanged,
+  ) => {
     connects++;
     const server = new McpServer({ name: "fixture", version: "1" });
+    servers.push(server);
     handles.push(
       server.registerTool(
         "echo",
@@ -34,9 +56,21 @@ async function fixture() {
         },
       ),
     );
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
     await server.connect(serverTransport);
-    const client = new Client({ name: "test", version: "1" });
+    const notify = () => onToolsChanged?.();
+    notifications.push(notify);
+    const client = new Client(
+      { name: "test", version: "1" },
+      {
+        versionNegotiation: { mode: config.protocol ?? "auto" },
+        listChanged: {
+          tools: { autoRefresh: false, debounceMs: 0, onChanged: notify },
+        },
+      },
+    );
+    clients.push(client);
     await client.connect(clientTransport);
     cleanup.push(() => server.close());
     return { client, transport: clientTransport };
@@ -53,6 +87,9 @@ async function fixture() {
     connect,
     directory,
     handles,
+    servers,
+    clients,
+    notifications,
     connects: () => connects,
     calls: () => calls,
   };
@@ -153,6 +190,200 @@ test("catalog cache loads without connecting", async () => {
   const result = await runtime.discover();
   expect(result.tools).toHaveLength(1);
   expect(result.unavailable).toEqual([]);
+});
+
+for (const protocol of ["auto", "legacy"] as const)
+  test(`tool notifications invalidate memory and disk catalogs (${protocol})`, async () => {
+    const f = await fixture();
+    f.runtime.config.example.protocol = protocol;
+    const { tools } = await f.runtime.discover();
+    const cache = join(
+      f.directory,
+      "cache",
+      `${f.runtime.identity("example")}.json`,
+    );
+    f.handles[0].remove();
+    f.servers[0].registerTool(
+      "new_tool",
+      { inputSchema: z.object({}) },
+      async () => ({ content: [] }),
+    );
+    await eventually(() =>
+      f.runtime.status().includes("unknown catalog tools"),
+    );
+    await eventually(
+      async () =>
+        !(await readdir(join(f.directory, "cache"))).includes(
+          `${f.runtime.identity("example")}.json`,
+        ),
+    );
+    const result = await f.runtime.discover();
+    expect(result.tools.map((tool) => tool.name)).toEqual(["new_tool"]);
+    expect(
+      JSON.parse(await readFile(cache, "utf8")).map(
+        (tool: { name: string }) => tool.name,
+      ),
+    ).toEqual(["new_tool"]);
+    expect(tools[0].name).toBe("echo");
+    await expect(f.runtime.call(tools[0], {})).rejects.toThrow(
+      "removed or its schema changed",
+    );
+    expect(f.calls()).toBe(0);
+  });
+
+test("notifications during a shared refresh discard its stale response", async () => {
+  const f = await fixture();
+  const { tools } = await f.runtime.discover();
+  const client = f.clients[0];
+  const listTools = client.listTools.bind(client);
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  let listings = 0;
+  client.listTools = async (...args) => {
+    const result = await listTools(...args);
+    if (++listings === 1) {
+      entered.resolve();
+      await release.promise;
+    }
+    return result;
+  };
+  const first = f.runtime.catalog("example", undefined, true);
+  await entered.promise;
+  f.handles[0].update({ paramsSchema: z.object({ renamed: z.string() }) });
+  await eventually(() => f.runtime.status().includes("unknown catalog tools"));
+  const second = f.runtime.discover();
+  release.resolve();
+  const [a, b] = await Promise.all([first, second]);
+  expect(a).toEqual(b.tools);
+  expect(a[0].schemaHash).not.toBe(tools[0].schemaHash);
+  expect(listings).toBe(2);
+  expect(f.calls()).toBe(0);
+});
+
+test("old connection and shutdown notifications do not invalidate current catalogs", async () => {
+  const f = await fixture();
+  await f.runtime.discover();
+  await f.runtime.reconnect("example");
+  f.notifications[0]();
+  expect(f.runtime.status()).toContain("1 catalog tools");
+  await f.runtime.close();
+  f.notifications[1]();
+  expect(f.runtime.status()).toContain("1 catalog tools");
+});
+
+test("notification storms are bounded and leave discovery retryable", async () => {
+  const f = await fixture();
+  await f.runtime.discover();
+  const client = f.clients[0];
+  const listTools = client.listTools.bind(client);
+  let listings = 0;
+  client.listTools = async (...args) => {
+    listings++;
+    const result = await listTools(...args);
+    f.notifications[0]();
+    return result;
+  };
+  await expect(f.runtime.catalog("example", undefined, true)).rejects.toThrow(
+    "tool_changed",
+  );
+  expect(listings).toBe(3);
+  client.listTools = listTools;
+  expect((await f.runtime.discover()).tools).toHaveLength(1);
+});
+
+test("failed notification refreshes never fall back to a stale catalog", async () => {
+  const f = await fixture();
+  await f.runtime.discover();
+  f.notifications[0]();
+  const client = f.clients[0];
+  const listTools = client.listTools.bind(client);
+  client.listTools = async () => { throw new Error("private-server-payload"); };
+  const result = await f.runtime.discover();
+  expect(result.tools).toEqual([]);
+  expect(result.unavailable).toHaveLength(1);
+  expect(JSON.stringify(result)).not.toContain("private-server-payload");
+  client.listTools = listTools;
+  expect((await f.runtime.discover()).tools).toHaveLength(1);
+});
+
+test("notifications racing a queued cache write cannot persist stale tools", async () => {
+  const f = await fixture();
+  await f.runtime.discover();
+  const path = join(
+    f.directory,
+    "cache",
+    `${f.runtime.identity("example")}.json`,
+  );
+  const locked = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const lock = withFileMutationQueue(path, async () => {
+    locked.resolve();
+    await release.promise;
+  });
+  await locked.promise;
+  const listed = Promise.withResolvers<void>();
+  const client = f.clients[0];
+  const listTools = client.listTools.bind(client);
+  client.listTools = async (...args) => {
+    const result = await listTools(...args);
+    listed.resolve();
+    return result;
+  };
+  const refresh = f.runtime.catalog("example", undefined, true);
+  try {
+    await listed.promise;
+    // Let the refresh reach the occupied file mutation queue.
+    await Bun.sleep(10);
+    f.handles[0].remove();
+    await eventually(() =>
+      f.runtime.status().includes("unknown catalog tools"),
+    );
+  } finally {
+    release.resolve();
+  }
+  await lock;
+  expect(await refresh).toEqual([]);
+  expect(JSON.parse(await readFile(path, "utf8"))).toEqual([]);
+});
+
+test("HTTP subscriptions outlive request deadlines and close cleanly", async () => {
+  const mcp = createMcpHandler(() => {
+    const server = new McpServer({ name: "subscription", version: "1" });
+    server.registerTool("echo", {}, async () => ({ content: [] }));
+    return server;
+  });
+  const http = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: (req) => mcp.fetch(req),
+  });
+  const abort = new AbortController();
+  const { client } = await connectSdk(
+    "example",
+    {
+      url: `http://127.0.0.1:${http.port}/mcp`,
+      timeoutMs: 200,
+    },
+    abort.signal,
+  );
+  try {
+    const subscription = client.autoOpenedSubscription!;
+    expect(subscription).toBeDefined();
+    let closed = false;
+    void subscription.closed.then(() => {
+      closed = true;
+    });
+    await Bun.sleep(300);
+    expect(closed).toBe(false);
+    await subscription.close();
+    expect(await subscription.closed).toBe("local");
+  } finally {
+    await client.autoOpenedSubscription?.close();
+    abort.abort();
+    await client.close();
+    await mcp.close();
+    await http.stop(true);
+  }
 });
 
 test("removed tools fail before execution", async () => {
@@ -277,31 +508,39 @@ test("shutdown closes a connection that finishes late", async () => {
 });
 
 for (const protocol of [undefined, "legacy"] as const)
-test(`real stdio transport loads and invokes tools (${protocol ?? "default auto"}), including MCP error results`, async () => {
-  const directory = await mkdtemp(join(tmpdir(), "mcp-stdio-"));
-  cleanup.push(() => rm(directory, { recursive: true, force: true }));
-  const runtime = new McpRuntime(
-    {
-      stdio: {
-        protocol,
-        command: process.execPath,
-        args: [fileURLToPath(new URL("./fixtures/server.ts", import.meta.url))],
+  test(`real stdio transport loads and invokes tools (${protocol ?? "default auto"}), including MCP error results`, async () => {
+    const directory = await mkdtemp(join(tmpdir(), "mcp-stdio-"));
+    cleanup.push(() => rm(directory, { recursive: true, force: true }));
+    const runtime = new McpRuntime(
+      {
+        stdio: {
+          protocol,
+          command: process.execPath,
+          args: [
+            fileURLToPath(new URL("./fixtures/server.ts", import.meta.url)),
+          ],
+        },
       },
-    },
-    directory,
-    join(directory, "cache"),
-  );
-  cleanup.push(() => runtime.close());
-  const { tools, unavailable } = await runtime.discover();
-  expect(unavailable).toEqual([]);
-  expect(tools).toHaveLength(2);
-  const result = await runtime.call(tools.find((tool) => tool.name === "echo")!, {
-    text: "hello stdio",
+      directory,
+      join(directory, "cache"),
+    );
+    cleanup.push(() => runtime.close());
+    const { tools, unavailable } = await runtime.discover();
+    expect(unavailable).toEqual([]);
+    expect(tools).toHaveLength(2);
+    const result = await runtime.call(
+      tools.find((tool) => tool.name === "echo")!,
+      {
+        text: "hello stdio",
+      },
+    );
+    expect(result.content).toEqual([{ type: "text", text: "hello stdio" }]);
+    const failure = await runtime.call(
+      tools.find((tool) => tool.name === "fail")!,
+      {},
+    );
+    expect(failure.isError).toBe(true);
   });
-  expect(result.content).toEqual([{ type: "text", text: "hello stdio" }]);
-  const failure = await runtime.call(tools.find((tool) => tool.name === "fail")!, {});
-  expect(failure.isError).toBe(true);
-});
 
 test("already-cancelled waiters still observe rejected shared work", async () => {
   const signal = AbortSignal.abort(new Error("Cancelled"));

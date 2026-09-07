@@ -201,6 +201,12 @@ They contain tool metadata, not configured credentials. Cached search needs no
 connection; invocation refreshes the live catalog before calling the tool.
 Connections remain open until shutdown or explicit reconnection.
 
+When a connected server reports a tool-list change, the extension invalidates its
+memory and disk catalogs. The next search fetches the current list, including new
+or removed tools. Notifications don't replace active tool definitions: changed
+schemas require another `mcp_search` before use. Disconnected, cache-only searches
+can't receive notifications and still use the 24-hour disk-cache expiry.
+
 ### OAuth
 
 Set `"oauth": true` under `mcpServers.<server>` in `mcp.json`, without an

@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import {
@@ -38,6 +38,10 @@ interface ServerState {
   listing?: Promise<CatalogTool[]>;
   listingLive?: boolean;
   connectionIdentity?: string;
+  connectionToken?: object;
+  catalogGeneration: number;
+  catalogDirty?: boolean;
+  invalidating?: Promise<void>;
   tools?: CatalogTool[];
   identity?: string;
   error?: Diagnostic;
@@ -54,9 +58,13 @@ export type ConnectFactory = (
   name: string,
   config: ServerConfig,
   signal: AbortSignal,
+  onToolsChanged?: () => void,
 ) => Promise<{ client: Client; transport: Transport }>;
 
-export function waitFor<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+export function waitFor<T>(
+  promise: Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> {
   if (!signal) return promise;
   return new Promise((resolve, reject) => {
     const abort = () => reject(signal.reason ?? new Error("Cancelled."));
@@ -76,11 +84,23 @@ export function waitFor<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T
   });
 }
 
-export const connectSdk: ConnectFactory = async (_name, config, signal) => {
+export const connectSdk: ConnectFactory = async (
+  _name,
+  config,
+  signal,
+  onToolsChanged,
+) => {
   const timeout = config.timeoutMs ?? 15_000;
   const client = new Client(
     { name: "pi-mcp-client", version: "0.1.0" },
     {
+      listChanged: {
+        tools: {
+          autoRefresh: false,
+          debounceMs: 0,
+          onChanged: () => onToolsChanged?.(),
+        },
+      },
       versionNegotiation: {
         mode: config.protocol ?? "auto",
         probe: { timeoutMs: timeout },
@@ -100,21 +120,38 @@ export const connectSdk: ConnectFactory = async (_name, config, signal) => {
         authProvider: config.oauth
           ? new OAuthProvider(config.url!, await credentialStore(config.url!))
           : undefined,
-        // Bound each HTTP request, including OAuth discovery and token refresh.
-        fetch: (input, init) =>
-          fetch(input, {
-            ...init,
-            signal: AbortSignal.any([
-              signal,
-              AbortSignal.timeout(timeout),
-              ...(init?.signal ? [init.signal] : []),
-            ]),
-          }),
+        // Bound HTTP responses (including OAuth), but not established SSE streams.
+        // The SDK bounds ordinary MCP requests with their request timeout.
+        fetch: async (input, init) => {
+          const deadline = new AbortController();
+          const timer = setTimeout(
+            () => deadline.abort(new Error("HTTP response timed out.")),
+            timeout,
+          );
+          timer.unref();
+          try {
+            const response = await fetch(input, {
+              ...init,
+              signal: AbortSignal.any([
+                signal,
+                deadline.signal,
+                ...(init?.signal ? [init.signal] : []),
+              ]),
+            });
+            if (response.headers.get("content-type")?.split(";")[0].trim() === "text/event-stream")
+              clearTimeout(timer);
+            return response;
+          } catch (error) {
+            clearTimeout(timer);
+            throw error;
+          }
+        },
       });
-  if (transport instanceof StdioClientTransport) transport.stderr?.on("data", () => {});
+  if (transport instanceof StdioClientTransport)
+    transport.stderr?.on("data", () => {});
   try {
     await waitFor(
-      client.connect(transport),
+      client.connect(transport, { signal, timeout }),
       AbortSignal.any([signal, AbortSignal.timeout(timeout)]),
     );
     signal.throwIfAborted();
@@ -129,6 +166,7 @@ export const connectSdk: ConnectFactory = async (_name, config, signal) => {
 export class McpRuntime {
   private readonly states = new Map<string, ServerState>();
   private readonly lifetime = new AbortController();
+  private closing?: Promise<void>;
   constructor(
     readonly config: Config,
     readonly cwd: string,
@@ -156,24 +194,32 @@ export class McpRuntime {
     });
   }
   private definition(name: string): ServerConfig {
-    const config = Object.hasOwn(this.config, name) ? this.config[name] : undefined;
+    const config = Object.hasOwn(this.config, name)
+      ? this.config[name]
+      : undefined;
     if (!config || config.disabled)
-      throw new ToolContractError("MCP server is not configured or is disabled.");
+      throw new ToolContractError(
+        "MCP server is not configured or is disabled.",
+      );
     return config;
   }
   private state(name: string): ServerState {
     let state = this.states.get(name);
     if (!state) {
-      state = {};
+      state = { catalogGeneration: 0 };
       this.states.set(name, state);
     }
     return state;
   }
   private async client(name: string): Promise<Client> {
+    if (this.closing) throw new Error("MCP session ended.");
     this.lifetime.signal.throwIfAborted();
     const state = this.state(name);
     const identity = this.identity(name);
-    if ((state.client || state.connecting) && state.connectionIdentity !== identity)
+    if (
+      (state.client || state.connecting) &&
+      state.connectionIdentity !== identity
+    )
       throw new ToolContractError(
         "MCP server configuration changed. Reload Pi before reconnecting.",
       );
@@ -181,6 +227,8 @@ export class McpRuntime {
     if (state.connecting) return state.connecting;
     const config = resolveServer(this.definition(name), this.cwd);
     state.connectionIdentity = identity;
+    const token = {};
+    state.connectionToken = token;
     state.connecting = (async () => {
       const { client, transport } = await this.connect(
         name,
@@ -191,8 +239,29 @@ export class McpRuntime {
           this.lifetime.signal,
         ),
         this.lifetime.signal,
+        () => {
+          if (
+            this.closing ||
+            this.lifetime.signal.aborted ||
+            state.connectionToken !== token
+          )
+            return;
+          state.catalogGeneration++;
+          state.catalogDirty = true;
+          state.tools = undefined;
+          state.warnings = undefined;
+          const path = join(this.cacheDir, `${identity}.json`);
+          state.invalidating = withFileMutationQueue(path, () =>
+            rm(path, { force: true }),
+          ).catch(() => {
+            state.warnings = [
+              `${name}: stale catalog cache could not be removed.`,
+            ];
+          });
+        },
       );
-      if (this.lifetime.signal.aborted) {
+      if (this.closing || this.lifetime.signal.aborted) {
+        await client.autoOpenedSubscription?.close().catch(() => {});
         await client.close();
         throw new Error("MCP session ended.");
       }
@@ -203,11 +272,13 @@ export class McpRuntime {
         if (state.client === client) {
           state.client = undefined;
           state.transport = undefined;
+          state.connectionToken = undefined;
         }
       };
       return client;
     })()
       .catch((error) => {
+        if (state.connectionToken === token) state.connectionToken = undefined;
         throw new DiagnosticError(
           diagnose(error, {
             server: name,
@@ -229,10 +300,13 @@ export class McpRuntime {
     refresh = false,
   ): Promise<CatalogTool[]> {
     signal?.throwIfAborted();
+    if (this.closing) throw new Error("MCP session ended.");
     this.lifetime.signal.throwIfAborted();
     const state = this.state(name);
     const identity = this.identity(name);
-    if (!refresh && state.tools && state.identity === identity) return state.tools;
+    refresh ||= !!state.catalogDirty;
+    if (!refresh && state.tools && state.identity === identity)
+      return state.tools;
     // A live validation must not accidentally join a disk-cache-only lookup.
     if (refresh && state.listing && !state.listingLive) {
       await waitFor(state.listing, signal);
@@ -241,44 +315,60 @@ export class McpRuntime {
     if (!state.listing) {
       state.listingLive = refresh;
       state.listing = (async () => {
-        if (!refresh) {
-          const cached = await this.readCache(name, identity);
-          if (cached) {
-            state.tools = cached;
-            state.identity = identity;
-            return cached;
+        // Retry only catalog reads, never invocations. Bound notification storms.
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const generation = state.catalogGeneration;
+          if (!refresh && !state.catalogDirty) {
+            const cached = await this.readCache(name, identity);
+            if (cached && generation === state.catalogGeneration) {
+              state.tools = cached;
+              state.identity = identity;
+              return cached;
+            }
           }
-        }
-        const client = await this.client(name);
-        const listed = await client.listTools(undefined, {
-          signal: this.lifetime.signal,
-          timeout: this.definition(name).timeoutMs ?? 15_000,
-        });
-        const tools: CatalogTool[] = [];
-        const warnings: string[] = [];
-        const seen = new Set<string>();
-        for (const tool of listed.tools) {
-          if (!allowed(tool.name, this.definition(name))) continue;
-          try {
-            const prepared = prepareTool(name, identity, tool);
-            if (seen.has(prepared.nativeName)) throw new Error("Duplicate tool name.");
-            seen.add(prepared.nativeName);
-            tools.push(prepared);
-          } catch {
-            warnings.push(
-              `${name}: skipped an invalid, duplicate, or unsupported tool schema.`,
-            );
+          const client = await this.client(name);
+          const listed = await client.listTools(undefined, {
+            signal: this.lifetime.signal,
+            timeout: this.definition(name).timeoutMs ?? 15_000,
+          });
+          const tools: CatalogTool[] = [];
+          const warnings: string[] = [];
+          const seen = new Set<string>();
+          for (const tool of listed.tools) {
+            if (!allowed(tool.name, this.definition(name))) continue;
+            try {
+              const prepared = prepareTool(name, identity, tool);
+              if (seen.has(prepared.nativeName))
+                throw new Error("Duplicate tool name.");
+              seen.add(prepared.nativeName);
+              tools.push(prepared);
+            } catch {
+              warnings.push(
+                `${name}: skipped an invalid, duplicate, or unsupported tool schema.`,
+              );
+            }
           }
+          this.lifetime.signal.throwIfAborted();
+          if (generation !== state.catalogGeneration) continue;
+          await state.invalidating;
+          await this.writeCache(
+            identity,
+            tools,
+            () => generation === state.catalogGeneration,
+          ).catch(() => {
+            warnings.push(`${name}: catalog cache could not be saved.`);
+          });
+          if (generation !== state.catalogGeneration) continue;
+          state.tools = tools;
+          state.identity = identity;
+          state.catalogDirty = false;
+          state.error = undefined;
+          state.warnings = warnings;
+          return tools;
         }
-        this.lifetime.signal.throwIfAborted();
-        state.tools = tools;
-        state.identity = identity;
-        state.error = undefined;
-        state.warnings = warnings;
-        await this.writeCache(identity, tools).catch(() => {
-          warnings.push(`${name}: catalog cache could not be saved.`);
-        });
-        return tools;
+        throw new ToolContractError(
+          "MCP tool catalog kept changing. Search again.",
+        );
       })()
         .catch((error) => {
           state.error = this.failure(name, error);
@@ -334,7 +424,10 @@ export class McpRuntime {
     progress?: (message: string) => void,
   ): Promise<CallToolResult> {
     const config = this.definition(tool.server);
-    if (!allowed(tool.name, config) || this.identity(tool.server) !== tool.identity)
+    if (
+      !allowed(tool.name, config) ||
+      this.identity(tool.server) !== tool.identity
+    )
       throw new ToolContractError(
         "MCP tool configuration changed. Search for the tool again.",
       );
@@ -351,7 +444,10 @@ export class McpRuntime {
       return await client.callTool(
         { name: tool.name, arguments: args },
         {
-          signal: AbortSignal.any([this.lifetime.signal, ...(signal ? [signal] : [])]),
+          signal: AbortSignal.any([
+            this.lifetime.signal,
+            ...(signal ? [signal] : []),
+          ]),
           timeout: config.timeoutMs ?? 30_000,
           onprogress: (event) =>
             progress?.(
@@ -377,6 +473,7 @@ export class McpRuntime {
     const state = this.state(name);
     if (state.connecting || state.listing)
       throw failure("busy", { server: name, operation: "reconnect" });
+    await state.client?.autoOpenedSubscription?.close();
     await state.client?.close();
     state.client = undefined;
     await this.catalog(name, undefined, true);
@@ -400,13 +497,23 @@ export class McpRuntime {
         .join("\n") || "No MCP servers configured."
     );
   }
-  async close(): Promise<void> {
+  close(): Promise<void> {
+    return (this.closing ??= this.shutdown());
+  }
+  private async shutdown(): Promise<void> {
+    // Send subscription cancellation while HTTP is still usable, then abort work.
+    await Promise.all(
+      [...this.states.values()].map((state) =>
+        state.client?.autoOpenedSubscription?.close().catch(() => {}),
+      ),
+    );
     this.lifetime.abort(new Error("MCP session ended."));
     await Promise.all(
       [...this.states.values()].map(async (state) => {
         await state.client?.close().catch(() => {});
         await state.connecting?.catch(() => {});
         await state.listing?.catch(() => {});
+        await state.invalidating;
       }),
     );
   }
@@ -427,7 +534,8 @@ export class McpRuntime {
     try {
       const path = join(this.cacheDir, `${identity}.json`);
       const info = await stat(path);
-      if (info.size > 4 * 1024 * 1024 || Date.now() - info.mtimeMs > 86_400_000) return;
+      if (info.size > 4 * 1024 * 1024 || Date.now() - info.mtimeMs > 86_400_000)
+        return;
       const data: unknown = JSON.parse(await readFile(path, "utf8"));
       if (!Array.isArray(data) || data.length > 10_000) return;
       return data
@@ -437,7 +545,11 @@ export class McpRuntime {
       return;
     }
   }
-  private async writeCache(identity: string, tools: CatalogTool[]): Promise<void> {
+  private async writeCache(
+    identity: string,
+    tools: CatalogTool[],
+    isCurrent: () => boolean,
+  ): Promise<void> {
     const text = JSON.stringify(
       tools.map(({ name, description, inputSchema }) => ({
         name,
@@ -449,9 +561,12 @@ export class McpRuntime {
     await mkdir(this.cacheDir, { recursive: true, mode: 0o700 });
     const path = join(this.cacheDir, `${identity}.json`);
     await withFileMutationQueue(path, async () => {
+      if (!isCurrent()) return;
       const temp = `${path}.${randomUUID()}.tmp`;
       await writeFile(temp, text, { mode: 0o600 });
-      await rename(temp, path);
+      // A notification can arrive during the write; never publish that snapshot.
+      if (isCurrent()) await rename(temp, path);
+      else await rm(temp, { force: true });
     });
   }
 }
