@@ -1,0 +1,6 @@
+id: pi-mcp-client
+name: Pi MCP Client
+repository: mavam/pi-mcp-client
+release:
+  version_files:
+    - ../package.json
