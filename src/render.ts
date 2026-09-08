@@ -2,7 +2,7 @@ import { keyText, type Theme } from "@earendil-works/pi-coding-agent";
 import { Text, truncateToWidth, type Component } from "@earendil-works/pi-tui";
 import { line, plain } from "./catalog.js";
 import { object } from "./config.js";
-import { formatOutput } from "./format.js";
+import { formatBlock, formatOutput } from "./format.js";
 import type { ClientDetails, RowState } from "./output.js";
 
 // Same glyphs and palette as Webfox's input status rows.
@@ -46,6 +46,14 @@ export function renderCall(
   };
 }
 
+/** Only recognize Pi's validation wrapper, not arbitrary embedded JSON. */
+function formatValidation(text: string, theme: Theme): string {
+  const marker = /\r?\n\r?\nReceived arguments:\r?\n/.exec(text);
+  if (!marker) return plain(text);
+  const start = marker.index + marker[0].length;
+  return plain(text.slice(0, start)) + formatBlock(text.slice(start), {}, theme);
+}
+
 export function renderResult(
   result: { content: { type: string; text?: string }[]; details?: unknown },
   options: { expanded: boolean; isPartial: boolean },
@@ -60,9 +68,17 @@ export function renderResult(
     .filter((part) => part.type === "text")
     .map((part) => part.text ?? "")
     .join("\n");
+  // Pi rejects invalid arguments before execute(), so these errors have no
+  // client details. Don't repeat their entire payload in the status row.
+  const validation = !details && isError
+    ? /^Validation failed for tool "[^"\r\n]+":\r?\n([\s\S]*)$/.exec(text)
+    : null;
+  const body = validation?.[1] ?? text;
   const rows = details?.rows ?? [
     {
-      label: line(text) || "Working…",
+      label: validation
+        ? "Invalid tool arguments"
+        : isError ? "Tool failed" : line(text) || "Working…",
       state: (isError ? "failed" : options.isPartial ? "running" : "done") as RowState,
     },
   ];
@@ -94,7 +110,9 @@ export function renderResult(
       if (options.expanded && !options.isPartial && text && !details?.searchNotes)
         lines.push(
           ...new Text(
-            formattedOutput ??= formatOutput(text, details?.displayBlocks, theme),
+            formattedOutput ??= validation
+              ? formatValidation(body, theme)
+              : formatOutput(body, details?.displayBlocks, theme),
             0, 0,
           ).render(width).map((x) => truncateToWidth(x, width)),
         );
