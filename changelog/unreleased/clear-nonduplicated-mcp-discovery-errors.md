@@ -1,6 +1,8 @@
 ---
 title: Clear, nonduplicated MCP discovery errors
 type: bugfix
+prs:
+  - 7
 authors:
   - mavam
 created: 2026-09-08T09:26:37.911655Z
