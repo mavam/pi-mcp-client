@@ -16,6 +16,15 @@ export interface DisplayRow {
   description?: string;
   state: RowState;
 }
+/** Character offsets into the model-facing text, without duplicating payloads. */
+export interface DisplayBlock {
+  start: number;
+  end: number;
+  mimeType?: string;
+  structured?: boolean;
+  resourceLink?: boolean;
+  truncated?: boolean;
+}
 export interface ClientDetails {
   mcpClient: 1;
   rows: DisplayRow[];
@@ -25,6 +34,7 @@ export interface ClientDetails {
   /** Search-only display notes; omit the duplicated model response in the TUI. */
   searchNotes?: string[];
   fullOutputPath?: string;
+  displayBlocks?: DisplayBlock[];
 }
 export function textResult(
   text: string,
@@ -38,11 +48,19 @@ export async function convertResult(
   label: string,
 ): Promise<AgentToolResult<ClientDetails>> {
   const texts: string[] = [];
+  const blocks: DisplayBlock[] = [];
+  let offset = 0;
+  const append = (text: string, metadata: Partial<DisplayBlock> = {}) => {
+    const start = offset + (texts.length ? 2 : 0);
+    offset = start + text.length;
+    texts.push(text);
+    blocks.push({ ...metadata, start, end: offset });
+  };
   const images: { type: "image"; data: string; mimeType: string }[] = [];
   let imageBytes = 0;
   let needsSpill = false;
   for (const part of result.content ?? []) {
-    if (part.type === "text") texts.push(part.text);
+    if (part.type === "text") append(part.text);
     else if (
       part.type === "image" &&
       ["image/png", "image/jpeg", "image/gif", "image/webp"].includes(part.mimeType) &&
@@ -51,19 +69,33 @@ export async function convertResult(
       images.push({ type: "image", data: part.data, mimeType: part.mimeType });
       imageBytes += part.data.length;
     } else if (part.type === "resource" && "text" in part.resource)
-      texts.push(part.resource.text);
-    else if (part.type === "resource_link") texts.push(`${part.name}: ${part.uri}`);
+      append(part.resource.text, { mimeType: part.resource.mimeType });
+    // The MIME type describes the linked resource, not this textual label.
+    else if (part.type === "resource_link")
+      append(`${part.name}: ${part.uri}`, {
+        mimeType: part.mimeType,
+        resourceLink: true,
+      });
     else {
-      texts.push(`[${part.type} content saved in full result file]`);
+      append(`[${part.type} content saved in full result file]`, {
+        mimeType: "text/plain",
+      });
       needsSpill = true;
     }
   }
   if (result.structuredContent !== undefined)
-    texts.push(JSON.stringify(result.structuredContent, null, 2));
+    append(JSON.stringify(result.structuredContent, null, 2), { structured: true });
   const truncated = truncateHead(texts.join("\n\n"));
   let text = truncated.content;
   const details: ClientDetails = {
     mcpClient: 1,
+    displayBlocks: blocks
+      .filter((block) => block.start < text.length)
+      .map((block) => ({
+        ...block,
+        end: Math.min(block.end, text.length),
+        ...(block.end > text.length ? { truncated: true } : {}),
+      })),
     failed: result.isError === true,
     ...(result.isError
       ? {
