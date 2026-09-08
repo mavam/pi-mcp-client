@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -114,7 +114,7 @@ test("command completion suggests actions first and servers only after an action
   } }));
   const complete = h.commands.get("mcp").getArgumentCompletions;
   expect(complete("")).toEqual(
-    ["list", "status", "reload", "inspect", "tools", "auth", "reconnect", "refresh"]
+    ["list", "status", "reload", "enable", "disable", "inspect", "tools", "auth", "reconnect", "refresh"]
       .map((value) => ({ value, label: value })),
   );
   expect(complete("to")).toEqual([{ value: "tools", label: "tools" }]);
@@ -142,6 +142,92 @@ test("command completion reflects configuration reloads and works without server
   await writeFile(join(h.directory, "mcp.json"), JSON.stringify({ mcpServers: { linear: fixtureServer } }));
   await h.command("reload");
   expect(complete("tools ")).toEqual([{ value: "tools linear", label: "linear" }]);
+});
+
+test("enable and disable persist, reconcile tools, and keep discovery lazy", async () => {
+  const h = await host(JSON.stringify({ mcpServers: { example: fixtureServer, other: fixtureServer } }));
+  const echo = (await h.execute("mcp_search", { query: "example.echo" })).details.loaded[0].nativeName;
+  const other = (await h.execute("mcp_search", { query: "other.echo" })).details.loaded[0].nativeName;
+  h.setActiveTools(["mcp_search", "unrelated", echo, other]);
+  // An already enabled server must not change identity or drop its active tools.
+  const before = await readFile(join(h.directory, "mcp.json"), "utf8");
+  await h.command("enable example");
+  expect(h.activeTools()).toContain(echo);
+  expect(await readFile(join(h.directory, "mcp.json"), "utf8")).toBe(before);
+  await h.command("disable example");
+  expect(h.notifications.at(-1)).toContain("disabled in global configuration");
+  expect(h.activeTools()).toEqual(["mcp_search", "unrelated", other]);
+  expect((await h.execute(echo, { text: "blocked" })).details.failed).toBe(true);
+  expect((await h.execute("mcp_search", { query: "example.echo" })).details.loaded ?? []).toEqual([]);
+  expect(h.hooks.get("before_agent_start")({ systemPrompt: "base" }).systemPrompt).not.toContain("- example");
+  const complete = h.commands.get("mcp").getArgumentCompletions;
+  expect(complete("enable ")).toEqual([{ value: "enable example", label: "example" }]);
+  expect(complete("disable ")).toEqual([{ value: "disable other", label: "other" }]);
+  await h.command("disable example");
+  await h.command("reload");
+  await h.command("inspect example");
+  expect(h.notifications.at(-1)).toContain("disabled");
+  await h.command("enable example");
+  expect(h.notifications.at(-1)).toContain("enabled in global configuration");
+  expect(h.activeTools()).toEqual(["mcp_search", "unrelated", other]);
+  await h.command("inspect example");
+  expect(h.notifications.at(-1)).toContain("disconnected");
+  const loaded = (await h.execute("mcp_search", { query: "example.echo" })).details.loaded;
+  expect(loaded).toHaveLength(1);
+  expect(JSON.stringify((await h.execute(loaded[0].nativeName, { text: "back" })).content)).toContain("back");
+  const document = JSON.parse(await readFile(join(h.directory, "mcp.json"), "utf8"));
+  expect(document.mcpServers.example.disabled).toBe(false);
+  expect(document.mcpServers.other).toEqual(fixtureServer);
+});
+
+test("toggles wait for idle and reject malformed commands without writes", async () => {
+  const h = await host(JSON.stringify({ mcpServers: { example: fixtureServer } }));
+  const path = join(h.directory, "mcp.json");
+  const before = await readFile(path, "utf8");
+  for (const args of ["enable", "disable", "disable missing", "enable example extra", "disable example extra"]) {
+    await h.command(args);
+    expect(h.notifications.at(-1)).toContain("Usage:");
+    expect(await readFile(path, "utf8")).toBe(before);
+  }
+  let release!: () => void;
+  h.ctx.waitForIdle = () => new Promise<void>((resolve) => { release = resolve; });
+  const disabling = h.command("disable example");
+  expect(await readFile(path, "utf8")).toBe(before);
+  release();
+  await disabling;
+  expect(JSON.parse(await readFile(path, "utf8")).mcpServers.example.disabled).toBe(true);
+});
+
+test("a session change while waiting for idle cancels a toggle", async () => {
+  const h = await host(JSON.stringify({ mcpServers: { example: fixtureServer } }));
+  const path = join(h.directory, "mcp.json");
+  const before = await readFile(path, "utf8");
+  let release!: () => void;
+  h.ctx.waitForIdle = () => new Promise<void>((resolve) => { release = resolve; });
+  const disabling = h.command("disable example");
+  await h.hooks.get("session_shutdown")({}, h.ctx);
+  release();
+  await disabling;
+  expect(h.notifications.at(-1)).toContain("session changed");
+  expect(await readFile(path, "utf8")).toBe(before);
+});
+
+test("failed enabling preserves disk and runtime without revealing secrets", async () => {
+  const h = await host(JSON.stringify({ mcpServers: {
+    example: fixtureServer,
+    invalid: { url: "https://user:private-token@example.com", disabled: true },
+  } }));
+  const echo = (await h.execute("mcp_search", { query: "example.echo" })).details.loaded[0].nativeName;
+  const before = await readFile(join(h.directory, "mcp.json"), "utf8");
+  await h.command("enable invalid");
+  expect(h.notifications.at(-1)).toContain("configuration_invalid");
+  expect(h.notifications.at(-1)).not.toContain("private-token");
+  expect(await readFile(join(h.directory, "mcp.json"), "utf8")).toBe(before);
+  expect(h.activeTools()).toContain(echo);
+  expect((await h.execute(echo, { text: "still works" })).details.failed).not.toBe(true);
+  h.ctx.hasUI = false;
+  await h.command("disable example");
+  await expect(h.command("enable invalid")).rejects.toThrow("configuration_invalid");
 });
 
 test("tool browsing lists filtered tools without activating any", async () => {

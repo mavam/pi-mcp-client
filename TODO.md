@@ -29,7 +29,7 @@ not every server or client needs all of them.
 
 - [x] **Server inspection and reload:** Inspect servers, browse tools, and reload
   configuration without restarting Pi; close connections and reconcile loaded tools.
-- [ ] **Server enable/disable commands:** Toggle servers without editing configuration.
+- [x] **Server enable/disable commands:** Toggle servers without editing configuration.
 - [ ] **Configuration imports:** Offer explicit, previewable imports from Claude,
   Cursor, VS Code, Codex, and MCPorter. Never silently merge credentials or execute
   imported commands.
