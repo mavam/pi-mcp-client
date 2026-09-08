@@ -103,6 +103,9 @@ export function renderResult(
           theme.fg(status === states.failed ? "error" : "accent", line(row.label)) +
           (row.inlineDescription
             ? theme.fg("dim", ` ${line(row.inlineDescription)}`)
+            : "") +
+          (row.inlineAction
+            ? theme.bold(theme.fg("dim", ` ${line(row.inlineAction)}`))
             : "");
         const rendered = options.expanded && (!details?.searchNotes || row.state === "failed")
           ? new Text(value, 0, 0).render(width).map((x) => truncateToWidth(x, width))
