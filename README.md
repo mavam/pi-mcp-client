@@ -66,6 +66,8 @@ not the displayed link label.
 | `/mcp inspect <server>` | Inspect status and configuration, including disabled servers. Connection values are hidden. |
 | `/mcp tools <server>` | Browse the server's tools and inspect descriptions without activating tools. |
 | `/mcp reload` | Apply configuration changes without restarting Pi. |
+| `/mcp enable <server>` | Enable a server in its effective configuration file. |
+| `/mcp disable <server>` | Disable a server, close its connection, and deactivate its tools. |
 | `/mcp auth <server>` | Authenticate an OAuth-enabled HTTP server. |
 | `/mcp reconnect <server>` | Replace a connection and refresh its catalog. |
 | `/mcp refresh <server>` | Refresh a server's catalog without loading additional tools. |
@@ -211,6 +213,21 @@ Pi. Reload validates the new configuration before replacing the current setup;
 invalid configuration leaves the previous setup intact. It closes existing
 connections, which reopen on demand, and deactivates tools from changed, removed,
 or disabled server definitions. Unchanged active tools remain available.
+
+To toggle a server without editing JSON, use `/mcp disable <server>` or
+`/mcp enable <server>`. The change persists in the trusted project's `.mcp.json`
+if that file defines the server; otherwise, it persists in the global
+`~/.pi/agent/mcp.json`. Untrusted project files are neither read nor changed.
+The command reports which scope changed. It updates only the `disabled` option,
+preserves other values (including secret references), and reformats the file as
+indented JSON. Repeating a toggle that's already set leaves the file unchanged.
+
+Both commands wait for active agent work to finish, then apply configuration as
+`/mcp reload` does: connections close and reopen on demand, while unchanged active
+tools from other servers remain available. Disabling removes the server from
+search and deactivates its tools. Enabling does not connect, authenticate, or load
+tools; ask the assistant to discover the capabilities you need. Other running Pi
+sessions pick up the saved change when they reload their MCP configuration.
 
 Use `/mcp inspect <server>` to check the effective transport, protocol, filters,
 and connection status without connecting or running secret commands. Connection

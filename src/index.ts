@@ -6,7 +6,7 @@ import {
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { loadConfig, resolveServer, allowed, object, type Config } from "./config.js";
+import { loadConfig, setServerDisabled, resolveServer, allowed, object, type Config } from "./config.js";
 import { inspectServer, inspectTool, serverMatrix, toolPickerLabel } from "./management.js";
 import {
   DEFAULT_SEARCH_LIMIT,
@@ -130,17 +130,26 @@ export default function mcpClient(
     exposure.restore(tools);
   };
 
-  async function reloadConfiguration(ctx: ExtensionContext) {
-    // Validate before replacing a working setup. Secret commands stay lazy.
+  async function reloadConfiguration(
+    ctx: ExtensionContext,
+    toggle?: { server: string; disabled: boolean },
+  ) {
+    // Validate before changing disk or replacing a working setup. Secrets stay lazy.
     const generation = sessionGeneration;
+    const validate = (nextConfig: Config) => {
+      ctx.signal?.throwIfAborted();
+      if (generation !== sessionGeneration)
+        throw new CommandUsageError("The Pi session changed during configuration reload.");
+      for (const definition of Object.values(nextConfig)) {
+        if (!definition.disabled) resolveServer(definition, ctx.cwd);
+      }
+    };
     ctx.signal?.throwIfAborted();
-    const nextConfig = await loadConfig(agentDir, ctx.cwd, ctx.isProjectTrusted());
-    ctx.signal?.throwIfAborted();
-    if (generation !== sessionGeneration)
-      throw new CommandUsageError("The Pi session changed during configuration reload.");
-    for (const definition of Object.values(nextConfig)) {
-      if (!definition.disabled) resolveServer(definition, ctx.cwd);
-    }
+    const update = toggle && await setServerDisabled(
+      agentDir, ctx.cwd, ctx.isProjectTrusted(), toggle.server, toggle.disabled, validate,
+    );
+    const nextConfig = update ? update.config : await loadConfig(agentDir, ctx.cwd, ctx.isProjectTrusted());
+    validate(nextConfig);
     const next = new McpRuntime(
       nextConfig,
       ctx.cwd,
@@ -164,6 +173,7 @@ export default function mcpClient(
     runtime = next;
     exposure.restore(retained);
     await old?.close();
+    return update?.scope;
   }
 
   pi.on("session_start", async (_event, ctx) => {
@@ -330,9 +340,9 @@ export default function mcpClient(
 
   pi.registerCommand("mcp", {
     description:
-      "Manage MCP servers: list, status, reload, inspect|tools|auth|reconnect|refresh <server>",
+      "Manage MCP servers: list, status, reload, enable|disable|inspect|tools|auth|reconnect|refresh <server>",
     getArgumentCompletions(prefix) {
-      const serverActions = ["inspect", "tools", "auth", "reconnect", "refresh"];
+      const serverActions = ["enable", "disable", "inspect", "tools", "auth", "reconnect", "refresh"];
       const input = prefix.trimStart();
       const match = /^(\S+)\s+(.*)$/s.exec(input);
       if (!match) {
@@ -345,24 +355,42 @@ export default function mcpClient(
       return Object.keys(config)
         .filter((name) =>
           name.startsWith(partialServer) &&
-          (action === "inspect" || !config[name].disabled),
+          (action === "inspect" || (action === "enable" ? config[name].disabled : !config[name].disabled)),
         )
         .sort()
         // Pi replaces the complete argument prefix, not just the server token.
         .map((name) => ({ value: `${action} ${name}`, label: name }));
     },
     async handler(args, ctx) {
+      const generation = sessionGeneration;
       await ctx.waitForIdle();
       const [action = "status", server, ...extra] = args
         .trim()
         .split(/\s+/)
         .filter(Boolean);
       try {
+        if (generation !== sessionGeneration)
+          throw new CommandUsageError("The Pi session changed while waiting for idle.");
         if (action === "reload" && !server) {
           await reloadConfiguration(ctx);
           if (ctx.hasUI)
             ctx.ui.notify(
               "✔︎ MCP configuration reloaded. Connections reopen on demand; tools from changed or removed servers are no longer active.",
+              "info",
+            );
+          return;
+        }
+        if (
+          (action === "enable" || action === "disable") &&
+          server && !extra.length && Object.hasOwn(config, server)
+        ) {
+          const scope = await reloadConfiguration(ctx, { server, disabled: action === "disable" });
+          if (ctx.hasUI)
+            ctx.ui.notify(
+              `✔︎ ${server}: ${action === "enable" ? "enabled" : "disabled"} in ${scope} configuration. ` +
+              (action === "enable"
+                ? "Connections and tool discovery remain on demand."
+                : "Its connection is closed and its tools are no longer active."),
               "info",
             );
           return;
@@ -397,7 +425,7 @@ export default function mcpClient(
           config[server].disabled
         )
           throw new CommandUsageError(
-            "Usage: /mcp list|status|reload or /mcp inspect|tools|auth|reconnect|refresh <server>. Only inspect accepts a disabled server.",
+            "Usage: /mcp list|status|reload or /mcp enable|disable|inspect|tools|auth|reconnect|refresh <server>. Disabled servers accept enable, disable, and inspect.",
           );
         if (action === "tools") {
           if (!ctx.hasUI)
@@ -476,7 +504,7 @@ export default function mcpClient(
         else if (action === "refresh") await current().catalog(server, ctx.signal, true);
         else
           throw new CommandUsageError(
-            "Unknown MCP command. Use /mcp list|status|reload or /mcp inspect|tools|auth|reconnect|refresh <server>.",
+            "Unknown MCP command. Use /mcp list|status|reload or /mcp enable|disable|inspect|tools|auth|reconnect|refresh <server>.",
           );
         if (ctx.hasUI)
           ctx.ui.notify(
@@ -491,7 +519,7 @@ export default function mcpClient(
                 diagnose(error, {
                   server,
                   operation:
-                    action === "reload" || action === "inspect"
+                    ["reload", "inspect", "enable", "disable"].includes(action)
                       ? "configuration"
                       : action === "tools"
                         ? "search"
