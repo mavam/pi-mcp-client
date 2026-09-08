@@ -71,6 +71,28 @@ test("other framework errors show their details once and sanitize terminal contr
   expect(rendered.match(/not permitted/g)).toHaveLength(1);
 });
 
+test("local failures render their full status message once without changing model content", () => {
+  for (const text of [
+    "gog: [server_unknown] The MCP server is not configured. Choose a configured server.",
+    "Use exactly one of query or activate.",
+    "gog: [tool_changed] The tool is unavailable. Retry discovery.",
+  ]) {
+    const result = {
+      content: [{ type: "text", text }],
+      details: { mcpClient: 1, failed: true, rows: [{ label: text, state: "failed" }] },
+    };
+    for (const expanded of [false, true]) {
+      const component = renderResult(result, { expanded, isPartial: false }, theme, true);
+      expect(component.render(240).join("\n").split(text)).toHaveLength(2);
+      for (const width of [0, 1, 2, 10, 80])
+        expect(component.render(width).every((row) => visibleWidth(row) <= width)).toBe(true);
+      component.invalidate();
+      expect(component.render(240).join("\n").split(text)).toHaveLength(2);
+    }
+    expect(result.content[0].text).toBe(text);
+  }
+});
+
 test("server text resembling validation errors is not reinterpreted", () => {
   const text = validationError();
   const result = {

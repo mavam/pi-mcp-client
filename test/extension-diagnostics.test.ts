@@ -92,6 +92,31 @@ test("discovery, including exact names, never registers, activates, or restores 
   expect(result.details).not.toHaveProperty("loaded");
 });
 
+test("unknown and disabled discovery servers fail without connecting or activating", async () => {
+  const h = await host(JSON.stringify({ mcpServers: {
+    example: fixtureServer,
+    offline: { ...fixtureServer, disabled: true },
+  } }));
+  const catalog = spyOn(McpRuntime.prototype, "catalog");
+  try {
+    for (const [server, code] of [
+      ["gog", "server_unknown"], ["toString", "server_unknown"],
+      ["offline", "server_disabled"],
+    ]) {
+      const result = await h.execute("mcp_tools", { query: "gmail search", server });
+      expect(result.details.failed).toBe(true);
+      expect(result.details.diagnostics[0]).toMatchObject({ code, server, operation: "search" });
+      expect(result.content[0].text).toMatch(/[Oo]mit server/);
+      expect(result.content[0].text).not.toContain("tool_changed");
+      expect(result.content[0].text).not.toContain("activate");
+      expect(result.details).not.toHaveProperty("loaded");
+    }
+    expect(catalog).not.toHaveBeenCalled();
+    expect(h.activeTools()).toEqual(["mcp_tools"]);
+    expect([...h.tools.keys()]).toEqual(["mcp_tools"]);
+  } finally { catalog.mockRestore(); }
+});
+
 test("activation needs no search, deduplicates aliases, and loads only explicit identifiers", async () => {
   const h = await host(JSON.stringify({ mcpServers: { example: fixtureServer, untouched: fixtureServer } }));
   h.setActiveTools(["mcp_tools", "unrelated"]);
