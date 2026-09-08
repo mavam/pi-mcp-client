@@ -476,6 +476,37 @@ test("partial discovery preserves healthy results and does not disclose error se
   expect(JSON.stringify(result)).not.toContain("secret-token");
 });
 
+test("multi-server discovery deduplicates targets, bounds concurrency, and preserves partial results", async () => {
+  const f = await fixture();
+  const names = Array.from({ length: 7 }, (_, i) => `server${i}`);
+  const attempted: string[] = [];
+  let pending = 0;
+  let peak = 0;
+  const runtime = new McpRuntime(
+    Object.fromEntries([...names, "untouched"].map((name) => [name, { command: "fixture" }])),
+    f.directory,
+    join(f.directory, "selected"),
+    async (name, config, signal) => {
+      attempted.push(name);
+      peak = Math.max(peak, ++pending);
+      try {
+        await Bun.sleep(10);
+        if (name === "server1") throw new Error("private-token");
+        return await f.connect(name, config, signal);
+      } finally { pending--; }
+    },
+  );
+  cleanup.push(() => runtime.close());
+  const result = await runtime.discover([...names, names[0]]);
+  expect(attempted.sort()).toEqual(names);
+  expect(peak).toBe(4);
+  expect(result.tools).toHaveLength(6);
+  expect(result.unavailable).toHaveLength(1);
+  expect(result.diagnostics[0].server).toBe("server1");
+  expect(JSON.stringify(result)).not.toContain("private-token");
+  expect(await runtime.discover([])).toEqual({ tools: [], unavailable: [], diagnostics: [], warnings: [] });
+});
+
 test("shutdown closes a connection that finishes late", async () => {
   const f = await fixture();
   let release!: () => void;

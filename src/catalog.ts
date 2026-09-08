@@ -64,6 +64,48 @@ export function prepareTool(
   };
 }
 
+/** Discovery exposes names, never a callable signature. */
+export function summarize(tool: CatalogTool): string {
+  const schema = tool.inputSchema as Record<string, unknown>;
+  const required = Array.isArray(schema.required)
+    ? schema.required.filter((name): name is string => typeof name === "string")
+    : [];
+  return `${tool.server}.${tool.name} — ${line(tool.description).slice(0, 180)} (required: ${required.map(line).join(", ") || "none"})`;
+}
+
+function distance(a: string, b: string): number {
+  const row = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 0; i < a.length; i++) {
+    let diagonal = row[0];
+    row[0] = i + 1;
+    for (let j = 0; j < b.length; j++) {
+      const previous = row[j + 1];
+      row[j + 1] = Math.min(row[j] + 1, previous + 1, diagonal + Number(a[i] !== b[j]));
+      diagonal = previous;
+    }
+  }
+  return row[b.length];
+}
+
+/** Suggestions are informational only; resolution is case-sensitive and exact. */
+export function resolveTools(tools: CatalogTool[], identifiers: string[]) {
+  return [...new Set(identifiers)].map((identifier) => {
+    const matches = tools.filter((tool) =>
+      identifier === tool.nativeName || identifier === `${tool.server}.${tool.name}`,
+    );
+    const tool = matches.length === 1 ? matches[0] : undefined;
+    const suggestions = tool ? [] : tools.map((candidate) => ({
+      name: `${candidate.server}.${candidate.name}`,
+      score: Math.min(
+        distance(identifier, `${candidate.server}.${candidate.name}`),
+        distance(identifier, candidate.nativeName),
+      ),
+    })).sort((a, b) => a.score - b.score || a.name.localeCompare(b.name))
+      .slice(0, 3).map(({ name }) => name);
+    return { identifier, tool, suggestions };
+  });
+}
+
 const STOP = new Set([
   "a",
   "an",

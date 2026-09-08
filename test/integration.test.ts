@@ -16,8 +16,9 @@ import extension from "../src/index.js";
 
 // A real Pi loop and real MCP HTTP transport; the model endpoint is local and
 // deterministic, so this test never consumes API credentials or model quota.
-for (const provider of ["anthropic", "openai"] as const)
-  test(`Pi ${provider}: search loads a deferred native tool for the next turn`, async () => {
+for (const mode of ["anthropic", "openai", "fallback"] as const)
+  test(`Pi ${mode}: discover, activate, then call a native tool`, async () => {
+    const provider = mode === "openai" ? "openai" : "anthropic";
     const directory = await mkdtemp(join(tmpdir(), "mcp-integration-"));
     let called = 0;
     const mcp = createMcpHandler(() => {
@@ -43,17 +44,18 @@ for (const provider of ["anthropic", "openai"] as const)
         if (new URL(req.url).pathname === "/mcp") return mcp.fetch(req);
         requests.push((await req.json()) as Record<string, any>);
         const turn = requests.length;
+        const name = turn <= 2 ? "mcp_search" : "mcp__fixture__echo";
+        const args = turn === 1 ? { query: "echo" }
+          : turn === 2 ? { activate: ["fixture.echo"] } : { message: "hello" };
         if (provider === "openai") {
           const item =
-            turn <= 2
+            turn <= 3
               ? {
                   type: "function_call",
                   id: `fc_${turn}`,
                   call_id: `call_${turn}`,
-                  name: turn === 1 ? "mcp_search" : "mcp__fixture__echo",
-                  arguments: JSON.stringify(
-                    turn === 1 ? { query: "echo" } : { message: "hello" },
-                  ),
+                  name,
+                  arguments: JSON.stringify(args),
                   status: "completed",
                 }
               : {
@@ -106,14 +108,14 @@ for (const provider of ["anthropic", "openai"] as const)
             },
           },
         ];
-        if (turn <= 2) {
+        if (turn <= 3) {
           events.push({
             type: "content_block_start",
             index: 0,
             content_block: {
               type: "tool_use",
               id: `call_${turn}`,
-              name: turn === 1 ? "mcp_search" : "mcp__fixture__echo",
+              name,
               input: {},
             },
           });
@@ -122,9 +124,7 @@ for (const provider of ["anthropic", "openai"] as const)
             index: 0,
             delta: {
               type: "input_json_delta",
-              partial_json: JSON.stringify(
-                turn === 1 ? { query: "echo" } : { message: "hello" },
-              ),
+              partial_json: JSON.stringify(args),
             },
           });
         } else {
@@ -144,7 +144,7 @@ for (const provider of ["anthropic", "openai"] as const)
           {
             type: "message_delta",
             delta: {
-              stop_reason: turn <= 2 ? "tool_use" : "end_turn",
+              stop_reason: turn <= 3 ? "tool_use" : "end_turn",
               stop_sequence: null,
             },
             usage: { output_tokens: 10 },
@@ -206,7 +206,7 @@ for (const provider of ["anthropic", "openai"] as const)
         modelRuntime,
         model: modelRuntime.getModel(
           provider,
-          provider === "anthropic" ? "claude-sonnet-4-5" : "gpt-5.4",
+          mode === "fallback" ? "claude-haiku-4-5" : provider === "anthropic" ? "claude-sonnet-4-5" : "gpt-5.4",
         )!,
         sessionManager: SessionManager.inMemory(directory),
         settingsManager,
@@ -215,27 +215,32 @@ for (const provider of ["anthropic", "openai"] as const)
       session = created.session;
       await session.bindExtensions({ mode: "print" });
       await session.prompt("Echo hello with MCP");
-      expect(requests).toHaveLength(3);
+      expect(requests).toHaveLength(4);
       expect(requests[0].tools.map((tool: any) => tool.name)).toEqual(["mcp_search"]);
-      expect(JSON.stringify(requests[1])).toContain("mcp__fixture__echo");
-      const loaderResult = session.messages.find(
+      expect(requests[1].tools).toEqual(requests[0].tools);
+      // Candidates contain only display metadata, not native definitions or refs.
+      expect(JSON.stringify(requests[1])).not.toContain("mcp__fixture__echo");
+      const results = session.messages.filter(
         (message) => message.role === "toolResult" && message.toolName === "mcp_search",
       );
-      expect(
-        loaderResult?.role === "toolResult" && loaderResult.addedToolNames,
-      ).toEqual(["mcp__fixture__echo"]);
-      if (provider === "anthropic") {
-        expect(JSON.stringify(requests[1].messages)).toContain("tool_reference");
-        expect(JSON.stringify(requests[1].system)).toBe(
-          JSON.stringify(requests[0].system),
-        );
+      expect(results).toHaveLength(2);
+      const [discoveryResult, loaderResult] = results;
+      expect(discoveryResult?.role === "toolResult" && discoveryResult.addedToolNames?.length || 0).toBe(0);
+      expect(discoveryResult?.role === "toolResult" && discoveryResult.details).toHaveProperty("candidates");
+      expect(discoveryResult?.role === "toolResult" && discoveryResult.details).not.toHaveProperty("loaded");
+      expect(loaderResult?.role === "toolResult" && loaderResult.addedToolNames).toEqual(["mcp__fixture__echo"]);
+      expect(JSON.stringify(requests[2])).toContain("mcp__fixture__echo");
+      if (mode === "fallback") {
+        expect(requests[2].tools.map((tool: any) => tool.name)).toEqual(["mcp_search", "mcp__fixture__echo"]);
+        expect(JSON.stringify(requests[2].messages)).not.toContain("tool_reference");
+      } else if (provider === "anthropic") {
+        expect(JSON.stringify(requests[2].messages)).toContain("tool_reference");
+        expect(JSON.stringify(requests[2].system)).toBe(JSON.stringify(requests[0].system));
       } else {
         // Pi 0.85.1 anchors native definitions with additional_tools on Responses.
-        expect(
-          requests[1].input.some((item: any) => item.type === "additional_tools"),
-        ).toBe(true);
-        expect(requests[1].input[0]).toEqual(requests[0].input[0]);
-        expect(requests[1].tools).toEqual(requests[0].tools);
+        expect(requests[2].input.some((item: any) => item.type === "additional_tools")).toBe(true);
+        expect(requests[2].input[0]).toEqual(requests[0].input[0]);
+        expect(requests[2].tools).toEqual(requests[0].tools);
       }
       expect(called).toBe(1);
       const callResult = session.messages.find(

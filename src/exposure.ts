@@ -1,6 +1,6 @@
 import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { object } from "./config.js";
-import { prepareTool, type CatalogTool } from "./catalog.js";
+import { MAX_SEARCH_LIMIT, prepareTool, type CatalogTool } from "./catalog.js";
 
 export const SEARCH_TOOL = "mcp_search";
 
@@ -18,7 +18,7 @@ export function restoredTools(entries: SessionEntry[]): CatalogTool[] {
     const details: unknown = entry.message.details;
     if (!object(details) || details.mcpClient !== 1 || !Array.isArray(details.loaded))
       continue;
-    for (const raw of details.loaded.slice(0, 10)) {
+    for (const raw of details.loaded.slice(0, MAX_SEARCH_LIMIT)) {
       if (
         !object(raw) ||
         typeof raw.server !== "string" ||

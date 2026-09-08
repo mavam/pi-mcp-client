@@ -10,7 +10,7 @@ import type { CallToolResult } from "@modelcontextprotocol/client";
 import type { CatalogTool } from "./catalog.js";
 import { diagnostic, type Diagnostic } from "./diagnostics.js";
 
-export type RowState = "queued" | "running" | "done" | "failed" | "cancelled";
+export type RowState = "candidate" | "queued" | "running" | "done" | "failed" | "cancelled";
 export interface DisplayRow {
   label: string;
   description?: string;
@@ -31,6 +31,7 @@ export interface ClientDetails {
   failed?: boolean;
   diagnostics?: Diagnostic[];
   loaded?: CatalogTool[];
+  candidates?: CatalogTool[];
   /** Search-only display notes; omit the duplicated model response in the TUI. */
   searchNotes?: string[];
   fullOutputPath?: string;

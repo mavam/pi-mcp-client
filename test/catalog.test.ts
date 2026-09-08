@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { allowed, interpolate, parseConfig, resolveServer } from "../src/config.js";
-import { nativeName, plain, prepareTool, searchTools } from "../src/catalog.js";
+import { nativeName, plain, prepareTool, resolveTools, searchTools, summarize } from "../src/catalog.js";
 
 const schema = {
   type: "object",
@@ -70,7 +70,32 @@ describe("tool catalog", () => {
     expect(nativeName("a", "get.issue")).not.toBe(nativeName("a", "get_issue"));
     expect(nativeName("a".repeat(80), "b".repeat(300))).toHaveLength(64);
   });
-  test("exact selector loads only that tool", () => {
+  test("resolution is exact, deduplicated, and suggestions never resolve a typo", () => {
+    const tools = [tool("linear", "list_teams"), tool("linear", "get_team")];
+    const result = resolveTools(tools, ["linear.list_teams", tools[1].nativeName, "linear.list_teams", "linear.list_team", "LINEAR.LIST_TEAMS"]);
+    expect(result).toHaveLength(4);
+    expect(result[0].tool).toBe(tools[0]);
+    expect(result[1].tool).toBe(tools[1]);
+    expect(result[2].tool).toBeUndefined();
+    expect(result[2].suggestions[0]).toBe("linear.list_teams");
+    expect(result[3].tool).toBeUndefined();
+    expect(resolveTools([], ["linear.list_teams"])[0].suggestions).toEqual([]);
+    const hashed = tool("long".repeat(20), "tool.name");
+    expect(resolveTools([hashed], [hashed.nativeName])[0].tool).toBe(hashed);
+  });
+  test("summaries show required names only and bound descriptions", () => {
+    const candidate = prepareTool("linear", "id", {
+      name: "get_team", description: "x".repeat(250),
+      inputSchema: { type: "object", properties: {
+        teamId: { type: "string", description: "secret parameter description" },
+        optional: { type: "integer" },
+      }, required: ["teamId"] },
+    });
+    expect(summarize(candidate)).toBe(`linear.get_team — ${"x".repeat(180)} (required: teamId)`);
+    expect(summarize(prepareTool("linear", "id", { name: "list_teams", description: "List teams.", inputSchema: { type: "object" } })))
+      .toBe("linear.list_teams — List teams. (required: none)");
+  });
+  test("exact selector discovers only that tool", () => {
     const tools = [tool("linear", "get_issue"), tool("linear", "list_issues")];
     expect(searchTools(tools, "linear.get_issue")).toEqual([tools[0]]);
     expect(searchTools(tools, "mcp__linear__get_issue")).toEqual([tools[0]]);

@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import extension from "../src/index.js";
-import { renderResult } from "../src/render.js";
+import { renderCall, renderResult } from "../src/render.js";
 
 const theme = {
   fg: (_: string, text: string) => text,
@@ -23,6 +23,13 @@ test("search schema describes the inclusive limit and default at the parameter",
   expect(limit.description).toContain("1–50 inclusive");
   expect(limit.description).toContain("default: 5");
   expect(search.parameters.properties.query.description).toContain("focused");
+  expect(search.parameters.required ?? []).not.toContain("query");
+  expect(search.parameters.required ?? []).not.toContain("activate");
+  expect(search.parameters.additionalProperties).toBe(false);
+  expect(search.parameters).not.toHaveProperty("anyOf");
+  expect(search.parameters.properties.activate.minItems).toBe(1);
+  expect(search.parameters.properties.activate.maxItems).toBe(50);
+  expect(search.description).toContain("Even an exact-name query is discovery-only");
 });
 
 test("search renders each tool once, with bounded expanded descriptions and visible warnings", () => {
@@ -52,6 +59,27 @@ test("search renders each tool once, with bounded expanded descriptions and visi
         expect(lines.join("\n")).toContain("already loaded");
         expect(lines.join("\n")).toContain("not loaded");
         if (expanded) expect(lines[1]).toContain("...");
+      }
+    }
+  }
+});
+
+test("candidate rows and both call forms are neutral and width-safe", () => {
+  const result = {
+    content: [{ type: "text", text: "No tools activated." }],
+    details: { mcpClient: 1, candidates: [], searchNotes: [], rows: [
+      { label: "linear.get_team — Fetch a team. (required: teamId) [loaded]", state: "candidate" },
+    ] },
+  };
+  for (const expanded of [false, true]) {
+    for (const width of [0, 1, 2, 10, 80]) {
+      const rows = renderResult(result, { expanded, isPartial: false }, theme, false).render(width);
+      expect(rows.every((row) => visibleWidth(row) <= width)).toBe(true);
+      if (width === 80) expect(rows[0]).toStartWith("○ linear.get_team");
+      for (const args of [{ query: "list teams" }, { activate: ["linear.get_team", "linear.list_teams"] }]) {
+        const call = renderCall("mcp search", args, theme, expanded).render(width);
+        expect(call.every((row) => visibleWidth(row) <= width)).toBe(true);
+        if (width === 80) expect(call.join("\n")).toContain("query" in args ? "list teams" : "linear.get_team");
       }
     }
   }

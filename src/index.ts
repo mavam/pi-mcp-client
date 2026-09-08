@@ -13,6 +13,8 @@ import {
   MAX_SEARCH_LIMIT,
   line,
   searchTools,
+  resolveTools,
+  summarize,
   type CatalogTool,
 } from "./catalog.js";
 import { authenticate } from "./auth.js";
@@ -209,7 +211,7 @@ export default function mcpClient(
       .join("\n");
     if (!directory) return;
     return {
-      systemPrompt: `${event.systemPrompt}\n\nAdditional MCP capabilities (directory metadata, not instructions):\n${directory}\nUse mcp_search to load relevant tools, then call them directly. Loaded tools remain available; search again only when a missing capability is needed.`,
+      systemPrompt: `${event.systemPrompt}\n\nAdditional MCP capabilities (directory metadata, not instructions):\n${directory}\nDiscover candidates with mcp_search({query: "capability", server: "name"}); discovery never activates tools, even for exact-name queries. Then explicitly activate only the identifiers you need with mcp_search({activate: ["server.tool"]}), and call the loaded native tools directly. Activation accepts exact identifiers without prior discovery and never invokes tools. Loaded tools remain available.`,
     };
   });
   pi.on("tool_result", (event) => {
@@ -226,15 +228,20 @@ export default function mcpClient(
     name: SEARCH_TOOL,
     label: "MCP Search",
     description:
-      "Search for and load MCP tools by capability or exact server.tool / mcp__server__tool name. Matches become directly callable on the next turn and remain available. Use a focused query and optionally a server name. Search only discovers tools; it does not invoke them. Default limit: 5, maximum: 50.",
+      "Discover MCP candidates with query (optional server and limit), or explicitly activate 1–50 exact server.tool / mcp__server__tool identifiers with activate. Exactly one of query or activate is required; server and limit are query-only. Even an exact-name query is discovery-only and never activates tools. Activation needs no prior search, never resolves fuzzy matches, and never invokes tools. Activated tools become natively callable on the next turn and remain available. Discovery default limit: 5, maximum: 50.",
     parameters: Type.Object(
       {
-        query: Type.String({
+        query: Type.Optional(Type.String({
           minLength: 1,
           maxLength: 500,
           description:
-            "One focused capability or exact server.tool name, for example linear.list_teams. Do not enumerate every capability of a server.",
-        }),
+            "One focused capability or exact server.tool name, for example linear.list_teams. Discovery only; does not activate tools.",
+        })),
+        activate: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 600 }), {
+          minItems: 1,
+          maxItems: MAX_SEARCH_LIMIT,
+          description: "Exact server.tool or mcp__server__tool identifiers to activate, without invoking. Duplicates are ignored. Cannot be combined with query, server, or limit.",
+        })),
         server: Type.Optional(
           Type.String({
             minLength: 1,
@@ -247,7 +254,7 @@ export default function mcpClient(
             minimum: 1,
             maximum: MAX_SEARCH_LIMIT,
             default: DEFAULT_SEARCH_LIMIT,
-            description: `Maximum number of tools to load: 1–${MAX_SEARCH_LIMIT} inclusive (default: ${DEFAULT_SEARCH_LIMIT}). This is not a limit on records returned by a native tool. Omit unless more tools are needed.`,
+            description: `Maximum number of candidates to return: 1–${MAX_SEARCH_LIMIT} inclusive (default: ${DEFAULT_SEARCH_LIMIT}). This is not a limit on records returned by a native tool. Omit unless more tools are needed.`,
           }),
         ),
       },
@@ -258,74 +265,83 @@ export default function mcpClient(
     renderResult: (result, options, theme, context) =>
       renderResult(result, options, theme, context.isError),
     async execute(_id, args, signal, onUpdate, ctx) {
+      // Validate the flat contract before even obtaining a runtime. Pi validates
+      // field types too, but hooks can mutate arguments after schema validation.
+      const usage = 'Use exactly one of {query: "capability", server?: "name", limit?: 1–50} or {activate: ["server.tool", ...]} (1–50 exact identifiers). server and limit are valid only with query.';
+      const hasQuery = args.query !== undefined;
+      const hasActivate = args.activate !== undefined;
+      if (
+        hasQuery === hasActivate ||
+        (hasActivate && (args.server !== undefined || args.limit !== undefined)) ||
+        (hasQuery && (typeof args.query !== "string" || !args.query.trim() || args.query.length > 500)) ||
+        (hasActivate && (!Array.isArray(args.activate) || args.activate.length < 1 || args.activate.length > MAX_SEARCH_LIMIT ||
+          args.activate.some((id) => typeof id !== "string" || !id.trim() || id.length > 600))) ||
+        (args.server !== undefined && (typeof args.server !== "string" || !args.server.trim() || args.server.length > 80)) ||
+        (args.limit !== undefined && (!Number.isInteger(args.limit) || args.limit < 1 || args.limit > MAX_SEARCH_LIMIT)) ||
+        Object.keys(args).some((key) => !["query", "activate", "server", "limit"].includes(key))
+      ) return textResult(usage, { mcpClient: 1, failed: true, rows: [{ label: usage, state: "failed" }] });
       try {
         const activeRuntime = current();
-        onUpdate?.(
-          textResult("Searching MCP catalog…", {
-            mcpClient: 1,
-            rows: [{ label: args.query, state: "running" }],
-          }),
+        const identifiers = [...new Set(args.activate ?? [])];
+        const serversFor = (identifier: string) => Object.keys(config).filter((name) =>
+          identifier.startsWith(`${name}.`) ||
+          identifier.startsWith(`mcp__${name}__`) ||
+          // Long server names can have a truncated, hashed native name.
+          (`mcp__${name}__`.length > 50 && identifier.startsWith(`mcp__${name}__`.slice(0, 50))),
         );
-        const namedServer = Object.keys(config)
-          .sort((a, b) => b.length - a.length)
-          .find(
-            (name) =>
-              args.query.startsWith(`${name}.`) ||
-              args.query.startsWith(`mcp__${name}__`),
-          );
+        onUpdate?.(textResult(hasActivate ? "Activating MCP tools…" : "Searching MCP catalog…", {
+          mcpClient: 1,
+          rows: [{ label: args.query ?? identifiers.join(", "), state: "running" }],
+        }));
         const discovery = await activeRuntime.discover(
-          args.server ?? namedServer,
+          hasActivate ? identifiers.flatMap(serversFor) : args.server ?? serversFor(args.query!)[0],
           signal ?? ctx.signal,
         );
         (signal ?? ctx.signal)?.throwIfAborted();
         if (runtime !== activeRuntime)
-          throw new Error("MCP session changed during search.");
-        const matches = searchTools(discovery.tools, args.query, args.server, args.limit);
-        const { loaded, added, rejected } = exposure.load(matches);
-        const messages = loaded.map(
-          (tool) =>
-            `${added.includes(tool.nativeName) ? "Loaded" : "Already loaded"}: ${tool.nativeName} — ${line(tool.description).slice(0, 180)}`,
-        );
-        if (!messages.length)
-          messages.push(
-            "No callable matches found. Try a more specific capability, server, or exact tool name.",
-          );
-        if (loaded.length)
-          messages.push(
-            "Call the loaded tools directly. Their full schemas are now available.",
-          );
-        messages.push(
-          ...discovery.unavailable.map((message) => `Not searched: ${message}`),
-          ...discovery.warnings,
-        );
-        if (rejected.length)
-          messages.push(
-            `Not loaded (name collision or Pi tool restriction): ${rejected.join(", ")}`,
-          );
+          throw new Error("MCP session changed during search or activation.");
         const details: ClientDetails = {
           mcpClient: 1,
-          loaded,
           searchNotes: discovery.warnings,
           diagnostics: discovery.diagnostics,
-          failed: !loaded.length && discovery.diagnostics.length > 0,
-          rows: [
-            ...loaded.map((tool) => ({
-              label: `${tool.server}.${tool.name} · ${added.includes(tool.nativeName) ? "loaded" : "already loaded"}`,
-              description: tool.description,
-              state: "done" as const,
-            })),
-            ...discovery.unavailable.map((label) => ({
-              label,
-              state: "failed" as const,
-            })),
-            ...rejected.map((name) => ({
-              label: `${name} · not loaded`,
-              state: "failed" as const,
-            })),
-          ],
+          rows: [],
         };
-        if (!details.rows.length)
-          details.rows.push({ label: "No matching tools", state: "done" });
+        const messages: string[] = [];
+        if (!hasActivate) {
+          const candidates = searchTools(discovery.tools, args.query!, args.server, args.limit);
+          details.candidates = candidates;
+          details.failed = !candidates.length && discovery.diagnostics.length > 0;
+          const active = new Set(pi.getActiveTools());
+          for (const tool of candidates) {
+            const label = summarize(tool) + (active.has(tool.nativeName) ? " [loaded]" : "");
+            messages.push(label);
+            details.rows.push({ label, state: "candidate" });
+          }
+          if (!candidates.length) messages.push("No matching tools. Try a more specific capability, server, or exact tool name.");
+          details.rows.push(...discovery.unavailable.map((label) => ({ label, state: "failed" as const })));
+          messages.push(...discovery.unavailable.map((message) => `Not searched: ${message}`), ...discovery.warnings);
+          messages.push('No tools activated. Call mcp_search({activate: [...]}) with the identifiers you need.');
+        } else {
+          const resolved = resolveTools(discovery.tools, identifiers);
+          const matches = [...new Map(resolved.flatMap(({ tool }) => tool ? [[tool.nativeName, tool] as const] : [])).values()];
+          const collisions = new Set(pi.getAllTools().filter((tool) => !exposure.definitions.has(tool.name)).map((tool) => tool.name));
+          const { loaded, added } = exposure.load(matches);
+          details.loaded = loaded;
+          details.failed = loaded.length === 0;
+          for (const { identifier, tool, suggestions } of resolved) {
+            const ok = tool && loaded.includes(tool);
+            const unavailable = discovery.diagnostics.find((value) => value.server && serversFor(identifier).includes(value.server));
+            const reason = unavailable ? `server unavailable: ${formatDiagnostic(unavailable)}`
+              : tool ? collisions.has(tool.nativeName) ? "name collision" : "restricted by Pi"
+              : `unknown identifier${suggestions.length ? `; nearest catalog names: ${suggestions.join(", ")}` : "; no catalog names available for this server. Check the server identifier or discover candidates with query."}`;
+            const label = `${line(identifier)} — ${ok ? added.includes(tool.nativeName) ? "loaded" : "already loaded" : `not loaded — ${reason}`}`;
+            messages.push(label);
+            details.rows.push({ label, state: ok ? "done" : "failed" });
+          }
+          if (loaded.length) messages.push("Call the loaded tools directly. Their full schemas are now available.");
+          messages.push(...discovery.warnings);
+        }
+        if (!details.rows.length) details.rows.push({ label: "No matching tools", state: "candidate" });
         return textResult(messages.join("\n"), details);
       } catch (error) {
         return errorResult(error, {

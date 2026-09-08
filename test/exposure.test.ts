@@ -78,4 +78,6 @@ test("restores definitions from successful loader results, not other branches", 
     }) as unknown as SessionEntry;
   expect(restoredTools([entry([a]), entry([b], true)])).toEqual([a]);
   expect(restoredTools([entry([{ invalid: true }])])).toEqual([]);
+  const legacyBatch = Array.from({ length: 50 }, (_, i) => tool(`legacy_${i}`));
+  expect(restoredTools([entry(legacyBatch)])).toEqual(legacyBatch);
 });
