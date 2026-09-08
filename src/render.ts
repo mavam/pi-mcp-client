@@ -23,9 +23,11 @@ export function renderCall(
   expanded: boolean,
 ): Component {
   const values = object(args) ? args : {};
-  const preview = Object.entries(values)
-    .map(([key, value]) => `${line(key)}=${line(JSON.stringify(value) ?? "")}`)
-    .join(" ");
+  const preview = title === "mcp activate" && Array.isArray(values.activate)
+    ? values.activate.filter((value): value is string => typeof value === "string").map(line).join(", ")
+    : Object.entries(values)
+      .map(([key, value]) => `${line(key)}=${line(JSON.stringify(value) ?? "")}`)
+      .join(" ");
   return {
     render(width) {
       if (width <= 0) return [];

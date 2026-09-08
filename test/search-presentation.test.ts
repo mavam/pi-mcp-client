@@ -98,6 +98,21 @@ test("candidate rows and both call forms are neutral and width-safe", () => {
   }
 });
 
+test("activation headers show identifiers without repeating the operation", () => {
+  for (const expanded of [false, true]) {
+    for (const width of [0, 1, 10, 120]) {
+      const rows = renderCall("mcp activate", {
+        activate: ["linear.list_teams", "linear.list_issues", "linear.list_projects"],
+      }, theme, expanded).render(width);
+      expect(rows.every((row) => visibleWidth(row) <= width)).toBe(true);
+      expect(rows.join("\n")).not.toContain("activate=");
+      if (width === 120) expect(rows[0]).toStartWith(
+        "mcp activate linear.list_teams, linear.list_issues, linear.list_projects",
+      );
+    }
+  }
+});
+
 test("inline descriptions use gray without separators and successful activation needs no suffix", () => {
   const colors: [string, string][] = [];
   const recordingTheme = {
