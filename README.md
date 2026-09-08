@@ -36,6 +36,18 @@ descriptions and support for prefix matching. Full schemas become available on
 the next model turn, without a separate describe step. Previously loaded tools
 remain available as the conversation continues.
 
+### Result display
+
+Expand a tool result to see JSON objects and arrays formatted with two-space
+indentation and syntax highlighting. Explicit JSON resource MIME types (including
+`application/*+json`) and structured content identify JSON without guessing.
+Other explicit MIME types stay plain text; unlabeled text is checked for JSON.
+
+Formatting changes only the display, not the response sent to the assistant.
+Invalid or truncated JSON stays plain text. Results that would exceed formatting
+limits also stay plain text. Resource-link MIME types describe the linked content,
+not the displayed link label.
+
 ### Session behavior
 
 - Tools accumulate rather than rotating with each prompt.

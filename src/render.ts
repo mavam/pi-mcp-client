@@ -2,6 +2,7 @@ import { keyText, type Theme } from "@earendil-works/pi-coding-agent";
 import { Text, truncateToWidth, type Component } from "@earendil-works/pi-tui";
 import { line, plain } from "./catalog.js";
 import { object } from "./config.js";
+import { formatOutput } from "./format.js";
 import type { ClientDetails, RowState } from "./output.js";
 
 // Same glyphs and palette as Webfox's input status rows.
@@ -55,18 +56,17 @@ export function renderResult(
     object(result.details) && result.details.mcpClient === 1
       ? (result.details as unknown as ClientDetails)
       : undefined;
-  const text = plain(
-    result.content
-      .filter((part) => part.type === "text")
-      .map((part) => part.text ?? "")
-      .join("\n"),
-  );
+  const text = result.content
+    .filter((part) => part.type === "text")
+    .map((part) => part.text ?? "")
+    .join("\n");
   const rows = details?.rows ?? [
     {
       label: line(text) || "Working…",
       state: (isError ? "failed" : options.isPartial ? "running" : "done") as RowState,
     },
   ];
+  let formattedOutput: string | undefined;
   return {
     render(width) {
       if (width <= 0) return [];
@@ -93,7 +93,10 @@ export function renderResult(
         ).map((row) => truncateToWidth(row, width)));
       if (options.expanded && !options.isPartial && text && !details?.searchNotes)
         lines.push(
-          ...new Text(text, 0, 0).render(width).map((x) => truncateToWidth(x, width)),
+          ...new Text(
+            formattedOutput ??= formatOutput(text, details?.displayBlocks, theme),
+            0, 0,
+          ).render(width).map((x) => truncateToWidth(x, width)),
         );
       if (!options.expanded && details?.fullOutputPath)
         lines.push(
@@ -104,6 +107,8 @@ export function renderResult(
         );
       return lines;
     },
-    invalidate() {},
+    invalidate() {
+      formattedOutput = undefined;
+    },
   };
 }
