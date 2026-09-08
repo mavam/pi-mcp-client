@@ -1,0 +1,8 @@
+created: 2026-09-08
+title: Clear MCP discovery errors
+intro: >-
+  MCP discovery now reports unknown and disabled servers with relevant recovery steps.
+  Expanded tool results show local error messages only once.
+source:
+  mode: sync-stable-queue
+  previous_stable: v0.3.0
