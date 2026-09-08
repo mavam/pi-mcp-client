@@ -100,16 +100,16 @@ export function renderResult(
         const value =
           theme.fg(status.color, status.glyph) +
           " " +
-          theme.fg("accent", line(row.label)) +
+          theme.fg(status === states.failed ? "error" : "accent", line(row.label)) +
           (row.inlineDescription
-            ? theme.fg("dim", ` ${line(row.inlineDescription)}`)
+            ? theme.fg(status === states.failed ? "error" : "dim", ` ${line(row.inlineDescription)}`)
             : "");
         const rendered = options.expanded && (!details?.searchNotes || row.state === "failed")
           ? new Text(value, 0, 0).render(width).map((x) => truncateToWidth(x, width))
           : [truncateToWidth(value, width)];
         if (options.expanded && row.description)
           rendered.push(truncateToWidth(
-            theme.fg("dim", `  ${line(row.description)}`), width,
+            theme.fg(status === states.failed ? "error" : "dim", `  ${line(row.description)}`), width,
           ));
         return rendered;
       });
@@ -122,9 +122,13 @@ export function renderResult(
       if (options.expanded && !options.isPartial && text && !details?.searchNotes && !bodyInRow)
         lines.push(
           ...new Text(
-            formattedOutput ??= validation
-              ? formatValidation(body, theme)
-              : formatOutput(body, details?.displayBlocks, theme),
+            formattedOutput ??= (() => {
+              const output = validation
+                ? formatValidation(body, theme)
+                : formatOutput(body, details?.displayBlocks, theme);
+              // Keep JSON syntax colors, but use error color for failure prose.
+              return isError || details?.failed ? theme.fg("error", output) : output;
+            })(),
             0, 0,
           ).render(width).map((x) => truncateToWidth(x, width)),
         );
