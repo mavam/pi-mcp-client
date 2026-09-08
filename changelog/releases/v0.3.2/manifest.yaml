@@ -1,0 +1,9 @@
+created: 2026-09-08
+title: Consistent MCP error colors
+intro: >-
+  MCP tool errors now use consistent error colors across discovery, activation, and
+  native tool calls. This release preserves JSON syntax highlighting while making
+  failure messages and details easier to distinguish.
+source:
+  mode: sync-stable-queue
+  previous_stable: v0.3.1
