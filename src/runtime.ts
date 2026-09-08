@@ -389,7 +389,14 @@ export class McpRuntime {
   }
 
   async discover(server?: string | string[], signal?: AbortSignal): Promise<Discovery> {
-    if (typeof server === "string") this.definition(server);
+    if (typeof server === "string") {
+      const config = Object.hasOwn(this.config, server) ? this.config[server] : undefined;
+      if (!config || config.disabled)
+        throw new DiagnosticError(diagnostic(
+          config ? "server_disabled" : "server_unknown",
+          { server, operation: "search" },
+        ));
+    }
     const names = Array.isArray(server) ? [...new Set(server)] : server
       ? [server]
       : Object.keys(this.config)

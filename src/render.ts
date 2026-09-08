@@ -86,6 +86,11 @@ export function renderResult(
       state: (isError ? "failed" : options.isPartial ? "running" : "done") as RowState,
     },
   ];
+  // Local failures can carry their full message in the status row as well as
+  // model-facing content. Keep the wrapped row, but don't repeat its body.
+  const bodyInRow = details?.rows.length === 1 &&
+    details.rows[0].state === "failed" && details.rows[0].label === text &&
+    !/[\r\n]/.test(text);
   let formattedOutput: string | undefined;
   return {
     render(width) {
@@ -114,7 +119,7 @@ export function renderResult(
           ? new Text(theme.fg("warning", plain(note)), 0, 0).render(width)
           : [theme.fg("warning", line(note))]
         ).map((row) => truncateToWidth(row, width)));
-      if (options.expanded && !options.isPartial && text && !details?.searchNotes)
+      if (options.expanded && !options.isPartial && text && !details?.searchNotes && !bodyInRow)
         lines.push(
           ...new Text(
             formattedOutput ??= validation

@@ -17,6 +17,8 @@ const messages = {
   cancelled: "The operation was cancelled.",
   connection_failed: "The server connection failed.",
   protocol_error: "The server response or protocol is not supported.",
+  server_unknown: "The MCP server is not configured.",
+  server_disabled: "The MCP server is disabled.",
   tool_changed: "The tool is unavailable or its configuration or schema changed.",
   tool_error: "The tool reported an error.",
   oauth_failed: "OAuth authentication did not complete.",
@@ -75,6 +77,10 @@ export function diagnostic(
     connection_failed: `Check the URL or executable, working directory, network, and TLS setup; then run /mcp reconnect ${target}.`,
     protocol_error:
       "Check the server's MCP compatibility and protocol setting. Only stdio and Streamable HTTP are supported.",
+    server_unknown:
+      "Choose a configured MCP server from the capability directory or run /mcp to list servers. Omit server in mcp_tools to search all enabled servers.",
+    server_disabled:
+      `Run /mcp enable ${target}, or omit server in mcp_tools to search all enabled servers.`,
     tool_changed:
       "Check server filters and use mcp_tools with activate and the exact identifier to activate the current tool definition. Reload Pi if the connection configuration changed.",
     tool_error:
