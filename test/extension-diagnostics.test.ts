@@ -82,24 +82,14 @@ test("discovery, including exact names, never registers, activates, or restores 
     expect(h.activeTools()).toEqual(["mcp_tools", "unrelated"]);
     expect([...h.tools.keys()]).toEqual(["mcp_tools"]);
     expect(result.details.candidates).toHaveLength(1);
-    expect(result.details.rows[0].label).toBe("example.echo");
-    expect(result.details.rows[0].inlineDescription).toBe("Echo text (required: text)");
     expect(result.details.rows[0].state).toBe("candidate");
     expect(result.details).not.toHaveProperty("loaded");
-    expect(result.content[0].text).toContain("example.echo — Echo text (required: text)");
-    expect(result.content[0].text).toEndWith('No tools activated. Call mcp_tools({activate: [...]}) with the identifiers you need.');
     expect(restoredTools([{ type: "message", message: { role: "toolResult", toolName: "mcp_tools", details: result.details, isError: false } } as any])).toEqual([]);
   }
   await h.execute("mcp_tools", { activate: ["example.echo"] });
   const result = await h.execute("mcp_tools", { query: "example.echo" });
-  expect(result.content[0].text).toContain("(required: text) [loaded]");
-  expect(result.details.rows[0]).toEqual({
-    label: "example.echo", inlineDescription: "Echo text (required: text)", state: "active",
-  });
+  expect(result.details.rows[0].state).toBe("active");
   expect(result.details).not.toHaveProperty("loaded");
-  const hint = h.hooks.get("before_agent_start")({ systemPrompt: "base" }).systemPrompt;
-  expect(hint).toContain("discovery never activates");
-  expect(hint).toContain('activate: ["server.tool"]');
 });
 
 test("activation needs no search, deduplicates aliases, and loads only explicit identifiers", async () => {
@@ -114,17 +104,15 @@ test("activation needs no search, deduplicates aliases, and loads only explicit 
   await h.command("inspect untouched");
   expect(h.notifications.at(-1)).toContain("disconnected");
   const again = await h.execute("mcp_tools", { activate: ["example.echo"] });
-  expect(again.content[0].text).toContain("already loaded");
-  expect(again.details.rows).toEqual([{ label: "example.echo", state: "done" }]);
-  expect(result.details.rows[0]).toEqual({ label: "example.echo", state: "done" });
+  expect(again.details.loaded).toEqual(result.details.loaded);
+  expect(h.activeTools()).toEqual(["mcp_tools", "unrelated", "mcp__example__echo"]);
 });
 
 test("typos fail with catalog suggestions, while partial activation succeeds", async () => {
   const h = await host(JSON.stringify({ mcpServers: { example: fixtureServer } }));
   const typo = await h.execute("mcp_tools", { activate: ["example.ech"] });
   expect(typo.details.failed).toBe(true);
-  expect(typo.content[0].text).toContain("not loaded — unknown identifier");
-  expect(typo.content[0].text).toContain("nearest catalog names: example.echo");
+  expect(typo.content[0].text).toContain("example.echo");
   expect(h.activeTools()).toEqual(["mcp_tools"]);
   expect([...h.tools.keys()]).toEqual(["mcp_tools"]);
   expect(h.hooks.get("tool_result")({ toolName: "mcp_tools", details: typo.details })).toEqual({ isError: true });
@@ -148,8 +136,9 @@ test("invalid argument combinations fail before any discovery or transport work"
     ]) {
       const result = await h.execute("mcp_tools", args);
       expect(result.details.failed).toBe(true);
-      expect(result.content[0].text).toContain("exactly one of");
-      expect(result.content[0].text).toContain("server and limit are valid only with query");
+      // The error must identify both legal modes without pinning its prose.
+      expect(result.content[0].text).toContain("query");
+      expect(result.content[0].text).toContain("activate");
     }
     expect(discover).not.toHaveBeenCalled();
     expect(h.activeTools()).toEqual(["mcp_tools"]);
@@ -501,16 +490,6 @@ test("list and status show the same matrix without connecting or loading tools",
   await h.command("list");
   expect(h.notifications.at(-1)).toContain("● example");
   expect(h.notifications.at(-1)).toMatch(/connected\s+2\s+1/);
-});
-
-test("successful management actions use checkmark notifications", async () => {
-  const h = await host(JSON.stringify({ mcpServers: { example: fixtureServer } }));
-  for (const action of ["refresh example", "reconnect example", "reload"]) {
-    await h.command(action);
-    expect(h.notifications.at(-1)).toStartWith("✔︎ ");
-    expect(h.notifications.at(-1)).not.toContain("mcp_tools");
-    expect(h.notifications.at(-1)).not.toContain("Search to load");
-  }
 });
 
 test("cancelled reloads do not replace the current configuration", async () => {

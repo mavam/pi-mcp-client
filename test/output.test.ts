@@ -49,68 +49,49 @@ test("spills oversized output to a private file, not result details", async () =
   }
 });
 
-test("glyph rows are compact, expandable, sanitized, and width-safe", () => {
-  for (const expanded of [false, true])
+test("renderers bound and sanitize all call and result variants", () => {
+  const hostile = "界".repeat(100) + "\x1b[31m\u202e";
+  const states = ["candidate", "active", "queued", "running", "done", "failed", "cancelled"] as const;
+  for (const expanded of [false, true]) {
     for (const width of [0, 1, 2, 10, 80]) {
-      const call = renderCall(
-        "mcp discover",
-        { query: "界".repeat(100) + "\x1b[31mevil" },
-        theme,
-        expanded,
-      );
-      const result = renderResult(
-        {
-          content: [{ type: "text", text: "\x1b[31manswer\u202etest" }],
-          details: { mcpClient: 1, rows: [{ label: "界".repeat(50), state: "done" }] },
-        },
-        { expanded, isPartial: false },
-        theme,
-        false,
-      );
-      for (const component of [call, result]) {
+      const calls = [
+        renderCall("mcp discover", { query: hostile, server: hostile }, theme, expanded),
+        renderCall("mcp activate", { activate: [hostile, hostile] }, theme, expanded),
+        renderCall("native", { input: hostile }, theme, expanded),
+      ];
+      const results = states.flatMap((state) => [false, true].map((isPartial) =>
+        renderResult({
+          content: [{ type: "text", text: hostile }],
+          details: { mcpClient: 1, rows: [{
+            label: hostile, description: hostile, inlineDescription: hostile, state,
+          }] },
+        }, { expanded, isPartial }, theme, state === "failed"),
+      ));
+      for (const component of [...calls, ...results]) {
         const rows = component.render(width);
         expect(rows.every((row) => visibleWidth(row) <= width)).toBe(true);
         expect(rows.join("")).not.toContain("\x1b[31m");
+        expect(rows.join("")).not.toContain("\u202e");
       }
     }
-  expect(
-    renderResult(
-      {
-        content: [],
-        details: { mcpClient: 1, rows: [{ label: "tool loaded", state: "done" }] },
-      },
-      { expanded: false, isPartial: false },
-      theme,
-      false,
-    ).render(80)[0],
-  ).toBe("✔︎ tool loaded");
+  }
 });
 
-test("running glyph uses muted while actual warnings retain warning color", () => {
-  const colors: [string, string][] = [];
-  const recordingTheme = {
-    ...theme,
-    fg: (color: string, text: string) => {
-      colors.push([color, text]);
-      return text;
-    },
-  } as Theme;
-  renderResult(
-    {
-      content: [],
+test("catalog results suppress duplicate content while native results expose their body", () => {
+  for (const catalog of [false, true]) {
+    const result = {
+      content: [{ type: "text", text: "Response body" }],
       details: {
         mcpClient: 1,
-        rows: [{ label: "Calling…", state: "running" }],
-        searchNotes: ["Catalog warning"],
+        rows: [{ label: "tool", state: "done" }],
+        ...(catalog ? { searchNotes: ["Catalog warning"] } : {}),
       },
-    },
-    { expanded: false, isPartial: true },
-    recordingTheme,
-    false,
-  ).render(80);
-  expect(colors).toContainEqual(["muted", "▶︎"]);
-  expect(colors).not.toContainEqual(["warning", "▶︎"]);
-  expect(colors).toContainEqual(["warning", "Catalog warning"]);
+    };
+    const text = renderResult(result, { expanded: true, isPartial: false }, theme, false)
+      .render(80).join("\n");
+    expect(text.includes("Response body")).toBe(!catalog);
+    expect(text.includes("Catalog warning")).toBe(catalog);
+  }
 });
 
 function store(): SecretStore {

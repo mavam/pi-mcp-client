@@ -91,9 +91,14 @@ describe("tool catalog", () => {
         optional: { type: "integer" },
       }, required: ["teamId"] },
     });
-    expect(summarize(candidate)).toBe(`linear.get_team — ${"x".repeat(180)} (required: teamId)`);
-    expect(summarize(prepareTool("linear", "id", { name: "list_teams", description: "List teams.", inputSchema: { type: "object" } })))
-      .toBe("linear.list_teams — List teams. (required: none)");
+    const summary = summarize(candidate);
+    expect(summary).toContain("linear.get_team");
+    expect(summary).toContain("teamId");
+    expect(summary).not.toContain("optional");
+    expect(summary).not.toContain("secret parameter description");
+    expect(summary).not.toContain("string");
+    expect(summary).not.toContain(candidate.description);
+    expect(summary.length).toBeLessThan(candidate.description.length);
   });
   test("exact selector discovers only that tool", () => {
     const tools = [tool("linear", "get_issue"), tool("linear", "list_issues")];

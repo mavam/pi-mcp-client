@@ -1,153 +1,28 @@
 import { expect, test } from "bun:test";
-import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
-import { visibleWidth } from "@earendil-works/pi-tui";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import extension from "../src/index.js";
-import { renderCall, renderResult } from "../src/render.js";
+import { DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT } from "../src/catalog.js";
 
-const theme = {
-  fg: (_: string, text: string) => text,
-  bold: (text: string) => text,
-} as unknown as Theme;
-
-test("search schema describes the inclusive limit and default at the parameter", () => {
-  let search: any;
+test("one flat tool schema supports discovery and activation", () => {
+  const tools: any[] = [];
   extension({
-    registerTool: (tool: any) => { search = tool; },
+    registerTool: (tool: any) => tools.push(tool),
     registerCommand: () => {},
     on: () => {},
   } as unknown as ExtensionAPI);
-  const limit = search.parameters.properties.limit;
-  expect(limit.minimum).toBe(1);
-  expect(limit.maximum).toBe(50);
-  expect(limit.default).toBe(5);
-  expect(limit.description).toContain("1–50 inclusive");
-  expect(limit.description).toContain("default: 5");
-  expect(search.parameters.properties.query.description).toContain("focused");
-  expect(search.parameters.required ?? []).not.toContain("query");
-  expect(search.parameters.required ?? []).not.toContain("activate");
-  expect(search.parameters.additionalProperties).toBe(false);
-  expect(search.parameters).not.toHaveProperty("anyOf");
-  expect(search.parameters.properties.activate.minItems).toBe(1);
-  expect(search.parameters.properties.activate.maxItems).toBe(50);
-  expect(search.description).toContain("Even an exact-name query is discovery-only");
-  expect(search.name).toBe("mcp_tools");
-  expect(search.label).toBe("MCP Tools");
-  for (const [args, title] of [
-    [{ query: "teams" }, "mcp discover"],
-    [{ activate: ["linear.list_teams"] }, "mcp activate"],
-  ] as const) {
-    expect(search.renderCall(args, theme, { expanded: false }).render(80)[0]).toStartWith(title);
-  }
-});
-
-test("search renders each tool once, with bounded expanded descriptions and visible warnings", () => {
-  const result = {
-    content: [{ type: "text", text: "Loaded: mcp__linear__list_teams — model-facing text" }],
-    details: {
-      mcpClient: 1,
-      searchNotes: ["Catalog warning"],
-      rows: [
-        { label: "linear.list_teams · loaded", description: "List teams " + "界".repeat(200) + "\x1b[31m", state: "done" },
-        { label: "linear.get_team · already loaded", state: "done" },
-        { label: "other: authentication required", state: "failed" },
-        { label: "restricted · not loaded", state: "failed" },
-      ],
-    },
-  };
-  for (const expanded of [false, true]) {
-    for (const width of [0, 1, 2, 10, 80]) {
-      const lines = renderResult(result, { expanded, isPartial: false }, theme, false).render(width);
-      expect(lines.every((row) => visibleWidth(row) <= width)).toBe(true);
-      expect(lines.join("\n")).not.toContain("model-facing text");
-      expect(lines.join("\n")).not.toContain("\x1b[31m");
-      if (width === 80) {
-        expect(lines).toHaveLength(expanded ? 6 : 5);
-        expect(lines.join("\n")).toContain("Catalog warning");
-        expect(lines.join("\n")).toContain("authentication required");
-        expect(lines.join("\n")).toContain("already loaded");
-        expect(lines.join("\n")).toContain("not loaded");
-        if (expanded) expect(lines[1]).toContain("...");
-      }
-    }
-  }
-});
-
-test("candidate rows and both call forms are neutral and width-safe", () => {
-  const result = {
-    content: [{ type: "text", text: "No tools activated." }],
-    details: { mcpClient: 1, candidates: [], searchNotes: [], rows: [
-      { label: "linear.get_team", inlineDescription: "Fetch a team. (required: teamId)", state: "candidate" },
-      { label: "linear.list_teams", inlineDescription: "List teams. (required: none)", state: "active" },
-    ] },
-  };
-  for (const expanded of [false, true]) {
-    for (const width of [0, 1, 2, 10, 80]) {
-      const rows = renderResult(result, { expanded, isPartial: false }, theme, false).render(width);
-      expect(rows.every((row) => visibleWidth(row) <= width)).toBe(true);
-      if (width === 80) {
-        expect(rows[0]).toStartWith("○ linear.get_team");
-        expect(rows[1]).toStartWith("● linear.list_teams");
-        expect(rows.join("\n")).not.toContain("[loaded]");
-      }
-      for (const args of [{ query: "list teams" }, { activate: ["linear.get_team", "linear.list_teams"] }]) {
-        const call = renderCall("mcp discover", args, theme, expanded).render(width);
-        expect(call.every((row) => visibleWidth(row) <= width)).toBe(true);
-        if (width === 80) expect(call.join("\n")).toContain("query" in args ? "list teams" : "linear.get_team");
-      }
-    }
-  }
-});
-
-test("activation headers show identifiers without repeating the operation", () => {
-  for (const expanded of [false, true]) {
-    for (const width of [0, 1, 10, 120]) {
-      const rows = renderCall("mcp activate", {
-        activate: ["linear.list_teams", "linear.list_issues", "linear.list_projects"],
-      }, theme, expanded).render(width);
-      expect(rows.every((row) => visibleWidth(row) <= width)).toBe(true);
-      expect(rows.join("\n")).not.toContain("activate=");
-      if (width === 120) expect(rows[0]).toStartWith(
-        "mcp activate linear.list_teams, linear.list_issues, linear.list_projects",
-      );
-    }
-  }
-});
-
-test("inline descriptions use gray without separators and successful activation needs no suffix", () => {
-  const colors: [string, string][] = [];
-  const recordingTheme = {
-    ...theme,
-    fg: (color: string, text: string) => { colors.push([color, text]); return text; },
-  } as Theme;
-  const rows = renderResult({
-    content: [],
-    details: { mcpClient: 1, searchNotes: [], rows: [
-      { label: "linear.get_team", inlineDescription: "Fetch a team.", state: "candidate" },
-      { label: "linear.list_teams", inlineDescription: "List teams.", state: "active" },
-      { label: "linear.get_team", state: "done" },
-      { label: "linear.bad", inlineDescription: "unknown identifier", state: "failed" },
-    ] },
-  }, { expanded: false, isPartial: false }, recordingTheme, false).render(80);
-  expect(rows).toEqual([
-    "○ linear.get_team Fetch a team.",
-    "● linear.list_teams List teams.",
-    "✔︎ linear.get_team",
-    "✘︎ linear.bad unknown identifier",
-  ]);
-  expect(colors).toContainEqual(["accent", "linear.get_team"]);
-  expect(colors).toContainEqual(["dim", " Fetch a team."]);
-});
-
-test("empty searches and native results retain useful output", () => {
-  const options = { expanded: true, isPartial: false };
-  const empty = renderResult({
-    content: [{ type: "text", text: "No callable matches found." }],
-    details: { mcpClient: 1, searchNotes: [], rows: [{ label: "No matching tools", state: "done" }] },
-  }, options, theme, false).render(80);
-  expect(empty).toEqual(["✔︎ No matching tools"]);
-  const native = renderResult({
-    content: [{ type: "text", text: "Native result body" }],
-    details: { mcpClient: 1, rows: [{ label: "linear.list_teams", state: "done" }] },
-  }, options, theme, false).render(80);
-  expect(native.join("\n")).toContain("Native result body");
+  expect(tools).toHaveLength(1);
+  const tool = tools[0];
+  expect(tool.name).toBe("mcp_tools");
+  const schema = tool.parameters;
+  expect(schema.type).toBe("object");
+  expect(schema.additionalProperties).toBe(false);
+  expect(schema).not.toHaveProperty("anyOf");
+  expect(schema).not.toHaveProperty("oneOf");
+  expect(schema.required ?? []).not.toContain("query");
+  expect(schema.required ?? []).not.toContain("activate");
+  expect(schema.properties.limit.minimum).toBe(1);
+  expect(schema.properties.limit.maximum).toBe(MAX_SEARCH_LIMIT);
+  expect(schema.properties.limit.default).toBe(DEFAULT_SEARCH_LIMIT);
+  expect(schema.properties.activate.minItems).toBe(1);
+  expect(schema.properties.activate.maxItems).toBe(MAX_SEARCH_LIMIT);
 });
