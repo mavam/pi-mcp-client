@@ -102,14 +102,14 @@ export function renderResult(
           " " +
           theme.fg(status === states.failed ? "error" : "accent", line(row.label)) +
           (row.inlineDescription
-            ? theme.fg(status === states.failed ? "error" : "dim", ` ${line(row.inlineDescription)}`)
+            ? theme.fg("dim", ` ${line(row.inlineDescription)}`)
             : "");
         const rendered = options.expanded && (!details?.searchNotes || row.state === "failed")
           ? new Text(value, 0, 0).render(width).map((x) => truncateToWidth(x, width))
           : [truncateToWidth(value, width)];
         if (options.expanded && row.description)
           rendered.push(truncateToWidth(
-            theme.fg(status === states.failed ? "error" : "dim", `  ${line(row.description)}`), width,
+            theme.fg("dim", `  ${line(row.description)}`), width,
           ));
         return rendered;
       });

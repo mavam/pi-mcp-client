@@ -325,7 +325,11 @@ export default function mcpClient(
             });
           }
           if (!candidates.length) messages.push("No matching tools. Try a more specific capability, server, or exact tool name.");
-          details.rows.push(...discovery.unavailable.map((label) => ({ label, state: "failed" as const })));
+          details.rows.push(...discovery.diagnostics.map((value) => ({
+            label: value.server ?? "MCP",
+            inlineDescription: `${value.message} ${value.hint}`,
+            state: "failed" as const,
+          })));
           messages.push(...discovery.unavailable.map((message) => `Not searched: ${message}`), ...discovery.warnings);
           messages.push('No tools activated. Call mcp_tools({activate: [...]}) with the identifiers you need.');
         } else {

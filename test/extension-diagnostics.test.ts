@@ -551,7 +551,12 @@ test("secret failures reach search details, status, and reconnect notifications"
   const result = await h.execute("mcp_tools", { query: "anything" });
   expect(result.details.failed).toBe(true);
   expect(result.details.diagnostics[0].code).toBe("secret_lookup_failed");
-  expect(result.details.rows[0].state).toBe("failed");
+  expect(result.details.rows[0]).toMatchObject({
+    label: "example",
+    state: "failed",
+  });
+  expect(result.details.rows[0].inlineDescription).not.toContain("[secret_lookup_failed]");
+  expect(result.details.rows[0].inlineDescription).not.toStartWith(":");
   await h.command("status");
   expect(h.notifications.at(-1)).toContain("[secret_lookup_failed]");
   await h.command("reconnect example");
