@@ -1,6 +1,6 @@
 {
   "name": "pi-mcp-client",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "MCP tools for Pi, discovered on demand and called natively through the official SDK.",
   "type": "module",
   "license": "MIT",

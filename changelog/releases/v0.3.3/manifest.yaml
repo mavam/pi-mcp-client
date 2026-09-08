@@ -1,0 +1,8 @@
+created: 2026-09-08
+title: Consistent diagnostic row styling
+intro: >-
+  MCP discovery failures now use compact, consistent row styling with muted explanations
+  and bold recovery commands.
+source:
+  mode: sync-stable-queue
+  previous_stable: v0.3.2
