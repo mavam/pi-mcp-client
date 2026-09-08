@@ -100,12 +100,12 @@ test("inline descriptions use gray without separators and successful activation 
     ] },
   }, { expanded: false, isPartial: false }, recordingTheme, false).render(80);
   expect(rows).toEqual([
-    "○ linear.get_team  Fetch a team.",
+    "○ linear.get_team Fetch a team.",
     "✔︎ linear.get_team",
-    "✘︎ linear.bad  unknown identifier",
+    "✘︎ linear.bad unknown identifier",
   ]);
   expect(colors).toContainEqual(["accent", "linear.get_team"]);
-  expect(colors).toContainEqual(["dim", "  Fetch a team."]);
+  expect(colors).toContainEqual(["dim", " Fetch a team."]);
 });
 
 test("empty searches and native results retain useful output", () => {

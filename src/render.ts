@@ -94,7 +94,7 @@ export function renderResult(
           " " +
           theme.fg("accent", line(row.label)) +
           (row.inlineDescription
-            ? theme.fg("dim", `  ${line(row.inlineDescription)}`)
+            ? theme.fg("dim", ` ${line(row.inlineDescription)}`)
             : "");
         const rendered = options.expanded && (!details?.searchNotes || row.state === "failed")
           ? new Text(value, 0, 0).render(width).map((x) => truncateToWidth(x, width))
