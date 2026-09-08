@@ -443,7 +443,7 @@ export class McpRuntime {
     const found = current.find((candidate) => candidate.name === tool.name);
     if (!found || found.schemaHash !== tool.schemaHash)
       throw new ToolContractError(
-        "MCP tool was removed or its schema changed. Use mcp_search with activate and its exact identifier to activate its current definition.",
+        "MCP tool was removed or its schema changed. Use mcp_tools with activate and its exact identifier to activate its current definition.",
       );
     const client = await waitFor(this.client(tool.server), signal);
     try {

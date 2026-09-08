@@ -76,7 +76,7 @@ export function diagnostic(
     protocol_error:
       "Check the server's MCP compatibility and protocol setting. Only stdio and Streamable HTTP are supported.",
     tool_changed:
-      "Check server filters and use mcp_search with activate and the exact identifier to activate the current tool definition. Reload Pi if the connection configuration changed.",
+      "Check server filters and use mcp_tools with activate and the exact identifier to activate the current tool definition. Reload Pi if the connection configuration changed.",
     tool_error:
       "Review the server's tool result and inputs. Verify the outcome before retrying.",
     oauth_failed: `Check OAuth support and browser access to the local callback, then run /mcp auth ${target}.`,

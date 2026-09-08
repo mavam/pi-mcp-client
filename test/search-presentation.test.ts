@@ -30,6 +30,14 @@ test("search schema describes the inclusive limit and default at the parameter",
   expect(search.parameters.properties.activate.minItems).toBe(1);
   expect(search.parameters.properties.activate.maxItems).toBe(50);
   expect(search.description).toContain("Even an exact-name query is discovery-only");
+  expect(search.name).toBe("mcp_tools");
+  expect(search.label).toBe("MCP Tools");
+  for (const [args, title] of [
+    [{ query: "teams" }, "mcp discover"],
+    [{ activate: ["linear.list_teams"] }, "mcp activate"],
+  ] as const) {
+    expect(search.renderCall(args, theme, { expanded: false }).render(80)[0]).toStartWith(title);
+  }
 });
 
 test("search renders each tool once, with bounded expanded descriptions and visible warnings", () => {
@@ -77,7 +85,7 @@ test("candidate rows and both call forms are neutral and width-safe", () => {
       expect(rows.every((row) => visibleWidth(row) <= width)).toBe(true);
       if (width === 80) expect(rows[0]).toStartWith("○ linear.get_team");
       for (const args of [{ query: "list teams" }, { activate: ["linear.get_team", "linear.list_teams"] }]) {
-        const call = renderCall("mcp search", args, theme, expanded).render(width);
+        const call = renderCall("mcp discover", args, theme, expanded).render(width);
         expect(call.every((row) => visibleWidth(row) <= width)).toBe(true);
         if (width === 80) expect(call.join("\n")).toContain("query" in args ? "list teams" : "linear.get_team");
       }

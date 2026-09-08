@@ -30,14 +30,14 @@ to inspect the connection. For authenticated services, see [OAuth](#oauth) or
 [secret commands](#secret-commands).
 
 Pi discovers candidates, explicitly activates the tools it needs, then calls
-those tools natively. One `mcp_search` tool supports both steps:
+those tools natively. One `mcp_tools` tool supports both steps:
 
 ```js
 // Discover candidates. Never activates, even for an exact-name query.
-mcp_search({ query: "list teams", server: "linear", limit: 5 })
+mcp_tools({ query: "list teams", server: "linear", limit: 5 })
 
 // Activate exact identifiers. Never invokes.
-mcp_search({ activate: ["linear.list_teams", "linear.get_team"] })
+mcp_tools({ activate: ["linear.list_teams", "linear.get_team"] })
 ```
 
 Pass exactly one of `query` or `activate`. The optional `server` and `limit`
@@ -57,6 +57,11 @@ Full schemas become available on the model turn after activation. First use of a
 capability now takes three turns—discover, activate, call—so a fuzzy search match
 can never become an active tool. Previously loaded tools remain available.
 
+`mcp_tools` replaces `mcp_search` without backward compatibility. Update explicit
+Pi tool allowlists to use `mcp_tools` and activate the tools you need again in
+existing sessions. The UI labels discovery calls **mcp discover** and activation
+calls **mcp activate**.
+
 ### Result display
 
 Expand a tool result to see JSON objects and arrays formatted with two-space
@@ -72,13 +77,13 @@ not the displayed link label.
 ### Session behavior
 
 - Tools accumulate rather than rotating with each prompt.
-- Resume and branch navigation restore tools activated on the selected branch,
-  including tools loaded by older versions. Discovery results never restore tools.
+- Resume and branch navigation restore tools activated through `mcp_tools` on
+  the selected branch. Discovery results never restore tools.
 - Compaction retains the acquired tool set. New sessions start fresh.
 - Pi uses native deferred loading where supported by the model and provider.
   Other providers receive the expanded tool list normally.
 - Discovery respects server filters; activation also respects Pi's tool exclusions. An explicit tool
-  allowlist must include both `mcp_search` and the native tools you want to load.
+  allowlist must include both `mcp_tools` and the native tools you want to load.
 
 ### Commands
 
@@ -281,7 +286,7 @@ Connections remain open until shutdown or explicit reconnection.
 When a connected server reports a tool-list change, the extension invalidates its
 memory and disk catalogs. The next discovery or activation fetches the current
 list, including new or removed tools. Notifications don't replace active tool
-definitions: changed schemas require another `mcp_search({activate: [...]})` before use. Disconnected, cache-only searches
+definitions: changed schemas require another `mcp_tools({activate: [...]})` before use. Disconnected, cache-only searches
 can't receive notifications and still use the 24-hour disk-cache expiry.
 
 ### OAuth

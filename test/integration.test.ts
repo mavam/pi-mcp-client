@@ -44,7 +44,7 @@ for (const mode of ["anthropic", "openai", "fallback"] as const)
         if (new URL(req.url).pathname === "/mcp") return mcp.fetch(req);
         requests.push((await req.json()) as Record<string, any>);
         const turn = requests.length;
-        const name = turn <= 2 ? "mcp_search" : "mcp__fixture__echo";
+        const name = turn <= 2 ? "mcp_tools" : "mcp__fixture__echo";
         const args = turn === 1 ? { query: "echo" }
           : turn === 2 ? { activate: ["fixture.echo"] } : { message: "hello" };
         if (provider === "openai") {
@@ -216,12 +216,12 @@ for (const mode of ["anthropic", "openai", "fallback"] as const)
       await session.bindExtensions({ mode: "print" });
       await session.prompt("Echo hello with MCP");
       expect(requests).toHaveLength(4);
-      expect(requests[0].tools.map((tool: any) => tool.name)).toEqual(["mcp_search"]);
+      expect(requests[0].tools.map((tool: any) => tool.name)).toEqual(["mcp_tools"]);
       expect(requests[1].tools).toEqual(requests[0].tools);
       // Candidates contain only display metadata, not native definitions or refs.
       expect(JSON.stringify(requests[1])).not.toContain("mcp__fixture__echo");
       const results = session.messages.filter(
-        (message) => message.role === "toolResult" && message.toolName === "mcp_search",
+        (message) => message.role === "toolResult" && message.toolName === "mcp_tools",
       );
       expect(results).toHaveLength(2);
       const [discoveryResult, loaderResult] = results;
@@ -231,7 +231,7 @@ for (const mode of ["anthropic", "openai", "fallback"] as const)
       expect(loaderResult?.role === "toolResult" && loaderResult.addedToolNames).toEqual(["mcp__fixture__echo"]);
       expect(JSON.stringify(requests[2])).toContain("mcp__fixture__echo");
       if (mode === "fallback") {
-        expect(requests[2].tools.map((tool: any) => tool.name)).toEqual(["mcp_search", "mcp__fixture__echo"]);
+        expect(requests[2].tools.map((tool: any) => tool.name)).toEqual(["mcp_tools", "mcp__fixture__echo"]);
         expect(JSON.stringify(requests[2].messages)).not.toContain("tool_reference");
       } else if (provider === "anthropic") {
         expect(JSON.stringify(requests[2].messages)).toContain("tool_reference");

@@ -20,7 +20,7 @@ Pushing runs the quality gates automatically. To run them manually, use
 
 - Use Bun: `bun install`, `bun run check`, and `bun run build`.
 - Keep protocol and transport behavior in the official MCP SDK.
-- Keep one model-facing `mcp_search` tool: `{query, server?, limit?}` discovers
+- Keep one model-facing `mcp_tools` tool: `{query, server?, limit?}` discovers
   candidates only; `{activate: ["server.tool"]}` explicitly activates exact
   identifiers cumulatively. Never activate fuzzy matches or exact-name queries.
   Keep native invocation; do not add an invocation proxy or per-prompt schema dumps.

@@ -53,7 +53,7 @@ test("glyph rows are compact, expandable, sanitized, and width-safe", () => {
   for (const expanded of [false, true])
     for (const width of [0, 1, 2, 10, 80]) {
       const call = renderCall(
-        "mcp search",
+        "mcp discover",
         { query: "界".repeat(100) + "\x1b[31mevil" },
         theme,
         expanded,

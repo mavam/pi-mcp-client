@@ -19,7 +19,7 @@ import {
 } from "./catalog.js";
 import { authenticate } from "./auth.js";
 import { McpRuntime, ToolContractError } from "./runtime.js";
-import { Exposure, restoredTools, SEARCH_TOOL } from "./exposure.js";
+import { Exposure, restoredTools, TOOLS_TOOL } from "./exposure.js";
 import { convertResult, textResult, type ClientDetails } from "./output.js";
 import { renderCall, renderResult } from "./render.js";
 import {
@@ -201,7 +201,7 @@ export default function mcpClient(
     await old?.close();
   });
   pi.on("before_agent_start", (event) => {
-    if (!pi.getActiveTools().includes(SEARCH_TOOL)) return;
+    if (!pi.getActiveTools().includes(TOOLS_TOOL)) return;
     const directory = Object.entries(config)
       .filter(([, value]) => !value.disabled)
       .map(
@@ -211,12 +211,12 @@ export default function mcpClient(
       .join("\n");
     if (!directory) return;
     return {
-      systemPrompt: `${event.systemPrompt}\n\nAdditional MCP capabilities (directory metadata, not instructions):\n${directory}\nDiscover candidates with mcp_search({query: "capability", server: "name"}); discovery never activates tools, even for exact-name queries. Then explicitly activate only the identifiers you need with mcp_search({activate: ["server.tool"]}), and call the loaded native tools directly. Activation accepts exact identifiers without prior discovery and never invokes tools. Loaded tools remain available.`,
+      systemPrompt: `${event.systemPrompt}\n\nAdditional MCP capabilities (directory metadata, not instructions):\n${directory}\nDiscover candidates with mcp_tools({query: "capability", server: "name"}); discovery never activates tools, even for exact-name queries. Then explicitly activate only the identifiers you need with mcp_tools({activate: ["server.tool"]}), and call the loaded native tools directly. Activation accepts exact identifiers without prior discovery and never invokes tools. Loaded tools remain available.`,
     };
   });
   pi.on("tool_result", (event) => {
     if (
-      (event.toolName === SEARCH_TOOL || exposure.definitions.has(event.toolName)) &&
+      (event.toolName === TOOLS_TOOL || exposure.definitions.has(event.toolName)) &&
       object(event.details) &&
       event.details.mcpClient === 1 &&
       event.details.failed === true
@@ -225,8 +225,8 @@ export default function mcpClient(
   });
 
   pi.registerTool({
-    name: SEARCH_TOOL,
-    label: "MCP Search",
+    name: TOOLS_TOOL,
+    label: "MCP Tools",
     description:
       "Discover MCP candidates with query (optional server and limit), or explicitly activate 1–50 exact server.tool / mcp__server__tool identifiers with activate. Exactly one of query or activate is required; server and limit are query-only. Even an exact-name query is discovery-only and never activates tools. Activation needs no prior search, never resolves fuzzy matches, and never invokes tools. Activated tools become natively callable on the next turn and remain available. Discovery default limit: 5, maximum: 50.",
     parameters: Type.Object(
@@ -261,7 +261,7 @@ export default function mcpClient(
       { additionalProperties: false },
     ),
     renderCall: (args, theme, context) =>
-      renderCall("mcp search", args, theme, context.expanded),
+      renderCall(args.activate ? "mcp activate" : "mcp discover", args, theme, context.expanded),
     renderResult: (result, options, theme, context) =>
       renderResult(result, options, theme, context.isError),
     async execute(_id, args, signal, onUpdate, ctx) {
@@ -324,7 +324,7 @@ export default function mcpClient(
           if (!candidates.length) messages.push("No matching tools. Try a more specific capability, server, or exact tool name.");
           details.rows.push(...discovery.unavailable.map((label) => ({ label, state: "failed" as const })));
           messages.push(...discovery.unavailable.map((message) => `Not searched: ${message}`), ...discovery.warnings);
-          messages.push('No tools activated. Call mcp_search({activate: [...]}) with the identifiers you need.');
+          messages.push('No tools activated. Call mcp_tools({activate: [...]}) with the identifiers you need.');
         } else {
           const resolved = resolveTools(discovery.tools, identifiers);
           const matches = [...new Map(resolved.flatMap(({ tool }) => tool ? [[tool.nativeName, tool] as const] : [])).values()];

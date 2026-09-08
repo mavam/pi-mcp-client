@@ -2,7 +2,7 @@ import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent
 import { object } from "./config.js";
 import { MAX_SEARCH_LIMIT, prepareTool, type CatalogTool } from "./catalog.js";
 
-export const SEARCH_TOOL = "mcp_search";
+export const TOOLS_TOOL = "mcp_tools";
 
 /** Only successful loader results on the current branch contribute exposure. */
 export function restoredTools(entries: SessionEntry[]): CatalogTool[] {
@@ -11,7 +11,7 @@ export function restoredTools(entries: SessionEntry[]): CatalogTool[] {
     if (
       entry.type !== "message" ||
       entry.message.role !== "toolResult" ||
-      entry.message.toolName !== SEARCH_TOOL ||
+      entry.message.toolName !== TOOLS_TOOL ||
       entry.message.isError
     )
       continue;

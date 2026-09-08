@@ -21,7 +21,7 @@ async function host(configuration: string, excluded: string[] = []) {
   const hooks = new Map<string, any>();
   const commands = new Map<string, any>();
   const notifications: string[] = [];
-  let active = ["mcp_search"];
+  let active = ["mcp_tools"];
   extension(
     {
       registerTool: (tool: any) => tools.set(tool.name, tool),
@@ -76,21 +76,21 @@ const fixtureServer = {
 
 test("discovery, including exact names, never registers, activates, or restores candidates", async () => {
   const h = await host(JSON.stringify({ mcpServers: { example: fixtureServer } }));
-  h.setActiveTools(["mcp_search", "unrelated"]);
+  h.setActiveTools(["mcp_tools", "unrelated"]);
   for (const query of ["echo", "example.echo", "mcp__example__echo"]) {
-    const result = await h.execute("mcp_search", { query });
-    expect(h.activeTools()).toEqual(["mcp_search", "unrelated"]);
-    expect([...h.tools.keys()]).toEqual(["mcp_search"]);
+    const result = await h.execute("mcp_tools", { query });
+    expect(h.activeTools()).toEqual(["mcp_tools", "unrelated"]);
+    expect([...h.tools.keys()]).toEqual(["mcp_tools"]);
     expect(result.details.candidates).toHaveLength(1);
     expect(result.details.rows[0].label).toBe("example.echo");
     expect(result.details.rows[0].inlineDescription).toBe("Echo text (required: text)");
     expect(result.details).not.toHaveProperty("loaded");
     expect(result.content[0].text).toContain("example.echo — Echo text (required: text)");
-    expect(result.content[0].text).toEndWith('No tools activated. Call mcp_search({activate: [...]}) with the identifiers you need.');
-    expect(restoredTools([{ type: "message", message: { role: "toolResult", toolName: "mcp_search", details: result.details, isError: false } } as any])).toEqual([]);
+    expect(result.content[0].text).toEndWith('No tools activated. Call mcp_tools({activate: [...]}) with the identifiers you need.');
+    expect(restoredTools([{ type: "message", message: { role: "toolResult", toolName: "mcp_tools", details: result.details, isError: false } } as any])).toEqual([]);
   }
-  await h.execute("mcp_search", { activate: ["example.echo"] });
-  const result = await h.execute("mcp_search", { query: "example.echo" });
+  await h.execute("mcp_tools", { activate: ["example.echo"] });
+  const result = await h.execute("mcp_tools", { query: "example.echo" });
   expect(result.content[0].text).toContain("(required: text) [loaded]");
   expect(result.details).not.toHaveProperty("loaded");
   const hint = h.hooks.get("before_agent_start")({ systemPrompt: "base" }).systemPrompt;
@@ -100,16 +100,16 @@ test("discovery, including exact names, never registers, activates, or restores 
 
 test("activation needs no search, deduplicates aliases, and loads only explicit identifiers", async () => {
   const h = await host(JSON.stringify({ mcpServers: { example: fixtureServer, untouched: fixtureServer } }));
-  h.setActiveTools(["mcp_search", "unrelated"]);
-  const result = await h.execute("mcp_search", { activate: ["example.echo", "example.echo", "mcp__example__echo"] });
+  h.setActiveTools(["mcp_tools", "unrelated"]);
+  const result = await h.execute("mcp_tools", { activate: ["example.echo", "example.echo", "mcp__example__echo"] });
   expect(result.details.loaded).toHaveLength(1);
   expect(result.details.rows).toHaveLength(2);
   expect(result.details.failed).toBe(false);
-  expect(h.activeTools()).toEqual(["mcp_search", "unrelated", "mcp__example__echo"]);
-  expect([...h.tools.keys()]).toEqual(["mcp_search", "mcp__example__echo"]);
+  expect(h.activeTools()).toEqual(["mcp_tools", "unrelated", "mcp__example__echo"]);
+  expect([...h.tools.keys()]).toEqual(["mcp_tools", "mcp__example__echo"]);
   await h.command("inspect untouched");
   expect(h.notifications.at(-1)).toContain("disconnected");
-  const again = await h.execute("mcp_search", { activate: ["example.echo"] });
+  const again = await h.execute("mcp_tools", { activate: ["example.echo"] });
   expect(again.content[0].text).toContain("already loaded");
   expect(again.details.rows).toEqual([{ label: "example.echo", state: "done" }]);
   expect(result.details.rows[0]).toEqual({ label: "example.echo", state: "done" });
@@ -117,18 +117,18 @@ test("activation needs no search, deduplicates aliases, and loads only explicit 
 
 test("typos fail with catalog suggestions, while partial activation succeeds", async () => {
   const h = await host(JSON.stringify({ mcpServers: { example: fixtureServer } }));
-  const typo = await h.execute("mcp_search", { activate: ["example.ech"] });
+  const typo = await h.execute("mcp_tools", { activate: ["example.ech"] });
   expect(typo.details.failed).toBe(true);
   expect(typo.content[0].text).toContain("not loaded — unknown identifier");
   expect(typo.content[0].text).toContain("nearest catalog names: example.echo");
-  expect(h.activeTools()).toEqual(["mcp_search"]);
-  expect([...h.tools.keys()]).toEqual(["mcp_search"]);
-  expect(h.hooks.get("tool_result")({ toolName: "mcp_search", details: typo.details })).toEqual({ isError: true });
-  const partial = await h.execute("mcp_search", { activate: ["example.echo", "example.ech"] });
+  expect(h.activeTools()).toEqual(["mcp_tools"]);
+  expect([...h.tools.keys()]).toEqual(["mcp_tools"]);
+  expect(h.hooks.get("tool_result")({ toolName: "mcp_tools", details: typo.details })).toEqual({ isError: true });
+  const partial = await h.execute("mcp_tools", { activate: ["example.echo", "example.ech"] });
   expect(partial.details.loaded).toHaveLength(1);
   expect(partial.details.failed).toBe(false);
   expect(partial.details.rows.map((row: any) => row.state)).toEqual(["done", "failed"]);
-  expect(h.hooks.get("tool_result")({ toolName: "mcp_search", details: partial.details })).toBeUndefined();
+  expect(h.hooks.get("tool_result")({ toolName: "mcp_tools", details: partial.details })).toBeUndefined();
 });
 
 test("invalid argument combinations fail before any discovery or transport work", async () => {
@@ -142,13 +142,13 @@ test("invalid argument combinations fail before any discovery or transport work"
       { activate: Array(51).fill("example.echo") }, { activate: [""] },
       { query: " " }, { query: "echo", limit: 0 }, { query: "echo", extra: true },
     ]) {
-      const result = await h.execute("mcp_search", args);
+      const result = await h.execute("mcp_tools", args);
       expect(result.details.failed).toBe(true);
       expect(result.content[0].text).toContain("exactly one of");
       expect(result.content[0].text).toContain("server and limit are valid only with query");
     }
     expect(discover).not.toHaveBeenCalled();
-    expect(h.activeTools()).toEqual(["mcp_search"]);
+    expect(h.activeTools()).toEqual(["mcp_tools"]);
   } finally { discover.mockRestore(); }
 });
 
@@ -158,22 +158,22 @@ test("activation reports restrictions, collisions, and unavailable servers separ
     offline: { ...fixtureServer, disabled: true },
   } }), ["mcp__example__echo"]);
   h.tools.set("mcp__example__fail", { name: "mcp__example__fail" });
-  const result = await h.execute("mcp_search", { activate: ["example.echo", "example.fail", "offline.echo"] });
+  const result = await h.execute("mcp_tools", { activate: ["example.echo", "example.fail", "offline.echo"] });
   expect(result.details.failed).toBe(true);
   expect(result.details.loaded).toEqual([]);
   expect(result.content[0].text).toContain("restricted by Pi");
   expect(result.content[0].text).toContain("name collision");
   expect(result.content[0].text).toContain("server unavailable");
-  expect(h.activeTools()).toEqual(["mcp_search"]);
+  expect(h.activeTools()).toEqual(["mcp_tools"]);
 });
 
 test("concurrent activations cumulatively expose their exact selections", async () => {
   const h = await host(JSON.stringify({ mcpServers: { example: fixtureServer, other: fixtureServer } }));
   const results = await Promise.all(["example.echo", "example.fail", "other.echo"].map((id) =>
-    h.execute("mcp_search", { activate: [id] }),
+    h.execute("mcp_tools", { activate: [id] }),
   ));
   expect(results.every((result) => result.details.loaded.length === 1)).toBe(true);
-  expect([...h.activeTools()].sort()).toEqual(["mcp_search", "mcp__example__echo", "mcp__example__fail", "mcp__other__echo"].sort());
+  expect([...h.activeTools()].sort()).toEqual(["mcp_tools", "mcp__example__echo", "mcp__example__fail", "mcp__other__echo"].sort());
 });
 
 for (const interruption of ["cancel", "session change"])
@@ -189,10 +189,10 @@ for (const interruption of ["cancel", "session change"])
       return result;
     });
     try {
-      const result = await h.execute("mcp_search", { activate: ["example.echo"] });
+      const result = await h.execute("mcp_tools", { activate: ["example.echo"] });
       expect(result.details.failed).toBe(true);
-      expect(h.activeTools()).toEqual(["mcp_search"]);
-      expect([...h.tools.keys()]).toEqual(["mcp_search"]);
+      expect(h.activeTools()).toEqual(["mcp_tools"]);
+      expect([...h.tools.keys()]).toEqual(["mcp_tools"]);
     } finally { discover.mockRestore(); }
   });
 
@@ -254,7 +254,7 @@ test("command completion suggests actions first and servers only after an action
   expect(complete("inspect d")).toEqual([{ value: "inspect disabled", label: "disabled" }]);
   for (const input of ["reload ", "list ", "status ", "unknown ", "tools missing", "tools linear "])
     expect(complete(input)).toEqual([]);
-  expect(h.activeTools()).toEqual(["mcp_search"]);
+  expect(h.activeTools()).toEqual(["mcp_tools"]);
   expect(h.notifications).toEqual([]);
 });
 
@@ -270,9 +270,9 @@ test("command completion reflects configuration reloads and works without server
 
 test("enable and disable persist, reconcile tools, and keep discovery lazy", async () => {
   const h = await host(JSON.stringify({ mcpServers: { example: fixtureServer, other: fixtureServer } }));
-  const echo = (await h.execute("mcp_search", { activate: ["example.echo"] })).details.loaded[0].nativeName;
-  const other = (await h.execute("mcp_search", { activate: ["other.echo"] })).details.loaded[0].nativeName;
-  h.setActiveTools(["mcp_search", "unrelated", echo, other]);
+  const echo = (await h.execute("mcp_tools", { activate: ["example.echo"] })).details.loaded[0].nativeName;
+  const other = (await h.execute("mcp_tools", { activate: ["other.echo"] })).details.loaded[0].nativeName;
+  h.setActiveTools(["mcp_tools", "unrelated", echo, other]);
   // An already enabled server must not change identity or drop its active tools.
   const before = await readFile(join(h.directory, "mcp.json"), "utf8");
   await h.command("enable example");
@@ -280,9 +280,9 @@ test("enable and disable persist, reconcile tools, and keep discovery lazy", asy
   expect(await readFile(join(h.directory, "mcp.json"), "utf8")).toBe(before);
   await h.command("disable example");
   expect(h.notifications.at(-1)).toContain("disabled in global configuration");
-  expect(h.activeTools()).toEqual(["mcp_search", "unrelated", other]);
+  expect(h.activeTools()).toEqual(["mcp_tools", "unrelated", other]);
   expect((await h.execute(echo, { text: "blocked" })).details.failed).toBe(true);
-  expect((await h.execute("mcp_search", { query: "example.echo" })).details.loaded ?? []).toEqual([]);
+  expect((await h.execute("mcp_tools", { query: "example.echo" })).details.loaded ?? []).toEqual([]);
   expect(h.hooks.get("before_agent_start")({ systemPrompt: "base" }).systemPrompt).not.toContain("- example");
   const complete = h.commands.get("mcp").getArgumentCompletions;
   expect(complete("enable ")).toEqual([{ value: "enable example", label: "example" }]);
@@ -293,10 +293,10 @@ test("enable and disable persist, reconcile tools, and keep discovery lazy", asy
   expect(h.notifications.at(-1)).toContain("disabled");
   await h.command("enable example");
   expect(h.notifications.at(-1)).toContain("enabled in global configuration");
-  expect(h.activeTools()).toEqual(["mcp_search", "unrelated", other]);
+  expect(h.activeTools()).toEqual(["mcp_tools", "unrelated", other]);
   await h.command("inspect example");
   expect(h.notifications.at(-1)).toContain("disconnected");
-  const loaded = (await h.execute("mcp_search", { activate: ["example.echo"] })).details.loaded;
+  const loaded = (await h.execute("mcp_tools", { activate: ["example.echo"] })).details.loaded;
   expect(loaded).toHaveLength(1);
   expect(JSON.stringify((await h.execute(loaded[0].nativeName, { text: "back" })).content)).toContain("back");
   const document = JSON.parse(await readFile(join(h.directory, "mcp.json"), "utf8"));
@@ -341,7 +341,7 @@ test("failed enabling preserves disk and runtime without revealing secrets", asy
     example: fixtureServer,
     invalid: { url: "https://user:private-token@example.com", disabled: true },
   } }));
-  const echo = (await h.execute("mcp_search", { activate: ["example.echo"] })).details.loaded[0].nativeName;
+  const echo = (await h.execute("mcp_tools", { activate: ["example.echo"] })).details.loaded[0].nativeName;
   const before = await readFile(join(h.directory, "mcp.json"), "utf8");
   await h.command("enable invalid");
   expect(h.notifications.at(-1)).toContain("configuration_invalid");
@@ -365,8 +365,8 @@ test("tool browsing lists filtered tools without activating any", async () => {
   expect(choices).toEqual(["1. echo: Echo text", "2. fail: Return a tool failure"]);
   expect(h.notifications.at(-1)).toContain("Echo text");
   expect(h.notifications.at(-1)).toContain("text: string (required)");
-  expect(h.activeTools()).toEqual(["mcp_search"]);
-  expect([...h.tools.keys()]).toEqual(["mcp_search"]);
+  expect(h.activeTools()).toEqual(["mcp_tools"]);
+  expect([...h.tools.keys()]).toEqual(["mcp_tools"]);
   await writeFile(
     join(h.directory, "mcp.json"),
     JSON.stringify({
@@ -378,18 +378,18 @@ test("tool browsing lists filtered tools without activating any", async () => {
   await h.command("reload");
   await h.command("tools example");
   expect(choices).toEqual(["1. echo: Echo text"]);
-  expect(h.activeTools()).toEqual(["mcp_search"]);
+  expect(h.activeTools()).toEqual(["mcp_tools"]);
 });
 
 test("reload retains unchanged active definitions and unrelated tools, but not inactive definitions", async () => {
   const h = await host(JSON.stringify({ mcpServers: { example: fixtureServer } }));
-  const echo = (await h.execute("mcp_search", { activate: ["example.echo"] })).details
+  const echo = (await h.execute("mcp_tools", { activate: ["example.echo"] })).details
     .loaded[0].nativeName;
-  const fail = (await h.execute("mcp_search", { activate: ["example.fail"] })).details
+  const fail = (await h.execute("mcp_tools", { activate: ["example.fail"] })).details
     .loaded[0].nativeName;
-  h.setActiveTools(["mcp_search", echo, "unrelated"]);
+  h.setActiveTools(["mcp_tools", echo, "unrelated"]);
   await h.command("reload");
-  expect(h.activeTools()).toEqual(["mcp_search", "unrelated", echo]);
+  expect(h.activeTools()).toEqual(["mcp_tools", "unrelated", echo]);
   expect(h.activeTools()).not.toContain(fail);
   await h.command("status");
   expect(h.notifications.at(-1)).toContain("idle");
@@ -400,7 +400,7 @@ test("reload retains unchanged active definitions and unrelated tools, but not i
 for (const change of ["changed", "disabled", "removed"])
   test(`reload deactivates ${change} servers and blocks old tool handlers`, async () => {
     const h = await host(JSON.stringify({ mcpServers: { example: fixtureServer } }));
-    const name = (await h.execute("mcp_search", { activate: ["example.echo"] })).details
+    const name = (await h.execute("mcp_tools", { activate: ["example.echo"] })).details
       .loaded[0].nativeName;
     await writeFile(
       join(h.directory, "mcp.json"),
@@ -427,7 +427,7 @@ for (const change of ["changed", "disabled", "removed"])
 
 test("invalid reload leaves the previous working configuration and tools intact", async () => {
   const h = await host(JSON.stringify({ mcpServers: { example: fixtureServer } }));
-  const name = (await h.execute("mcp_search", { activate: ["example.echo"] })).details
+  const name = (await h.execute("mcp_tools", { activate: ["example.echo"] })).details
     .loaded[0].nativeName;
   for (const invalid of [
     '{"mcpServers": secret-token',
@@ -458,19 +458,19 @@ test("reload recovers from startup errors and respects project trust", async () 
   );
   await h.command("reload");
   expect(
-    (await h.execute("mcp_search", { activate: ["example.echo"] })).details.loaded,
+    (await h.execute("mcp_tools", { activate: ["example.echo"] })).details.loaded,
   ).toHaveLength(1);
   h.ctx.isProjectTrusted = () => true;
   await h.command("reload");
   await h.command("inspect example");
   expect(h.notifications.at(-1)).toContain("disabled");
-  expect(h.activeTools()).toEqual(["mcp_search"]);
+  expect(h.activeTools()).toEqual(["mcp_tools"]);
 });
 
 test("empty tool catalogs, picker cancellation, and headless browsing don't activate tools", async () => {
   const h = await host(JSON.stringify({ mcpServers: { example: fixtureServer } }));
   await h.command("tools example"); // The picker returns undefined.
-  expect(h.activeTools()).toEqual(["mcp_search"]);
+  expect(h.activeTools()).toEqual(["mcp_tools"]);
   await writeFile(join(h.directory, "mcp.json"), JSON.stringify({ mcpServers: {
     example: { ...fixtureServer, includeTools: [] },
   } }));
@@ -479,7 +479,7 @@ test("empty tool catalogs, picker cancellation, and headless browsing don't acti
   expect(h.notifications.at(-1)).toContain("no tools available");
   h.ctx.hasUI = false;
   await expect(h.command("tools example")).rejects.toThrow("interactive UI");
-  expect(h.activeTools()).toEqual(["mcp_search"]);
+  expect(h.activeTools()).toEqual(["mcp_tools"]);
 });
 
 test("list and status show the same matrix without connecting or loading tools", async () => {
@@ -492,8 +492,8 @@ test("list and status show the same matrix without connecting or loading tools",
   expect(listing).toContain("Connections open on demand");
   await h.command("status");
   expect(h.notifications.at(-1)).toBe(listing);
-  expect(h.activeTools()).toEqual(["mcp_search"]);
-  await h.execute("mcp_search", { activate: ["example.echo"] });
+  expect(h.activeTools()).toEqual(["mcp_tools"]);
+  await h.execute("mcp_tools", { activate: ["example.echo"] });
   await h.command("list");
   expect(h.notifications.at(-1)).toContain("● example");
   expect(h.notifications.at(-1)).toMatch(/connected\s+2\s+1/);
@@ -504,7 +504,7 @@ test("successful management actions use checkmark notifications", async () => {
   for (const action of ["refresh example", "reconnect example", "reload"]) {
     await h.command(action);
     expect(h.notifications.at(-1)).toStartWith("✔︎ ");
-    expect(h.notifications.at(-1)).not.toContain("mcp_search");
+    expect(h.notifications.at(-1)).not.toContain("mcp_tools");
     expect(h.notifications.at(-1)).not.toContain("Search to load");
   }
 });
@@ -521,7 +521,7 @@ test("cancelled reloads do not replace the current configuration", async () => {
 
 test("configuration errors reach search and status without leaking malformed JSON", async () => {
   const h = await host('{"mcpServers": private-token');
-  const result = await h.execute("mcp_search", { query: "anything" });
+  const result = await h.execute("mcp_tools", { query: "anything" });
   expect(result.details.failed).toBe(true);
   expect(result.details.diagnostics[0].code).toBe("configuration_invalid");
   await h.command("status");
@@ -540,7 +540,7 @@ test("secret failures reach search details, status, and reconnect notifications"
       },
     }),
   );
-  const result = await h.execute("mcp_search", { query: "anything" });
+  const result = await h.execute("mcp_tools", { query: "anything" });
   expect(result.details.failed).toBe(true);
   expect(result.details.diagnostics[0].code).toBe("secret_lookup_failed");
   expect(result.details.rows[0].state).toBe("failed");
@@ -562,7 +562,7 @@ test("native tools distinguish server-reported errors from cancelled calls", asy
       },
     }),
   );
-  const loaded = await h.execute("mcp_search", { activate: ["example.fail"] });
+  const loaded = await h.execute("mcp_tools", { activate: ["example.fail"] });
   const name = loaded.details.loaded[0].nativeName;
   const result = await h.execute(name, {});
   expect(result.details.diagnostics[0].code).toBe("tool_error");

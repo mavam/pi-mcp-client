@@ -82,7 +82,7 @@ test("status matrix distinguishes idle, connected, loading, disabled, failed, an
   expect(text).toContain("✘︎ failed");
   expect(text).toContain("[authentication_required]");
   expect(text).toMatch(/● empty\s+connected\s+0\s+0/);
-  expect(text).not.toContain("mcp_search");
+  expect(text).not.toContain("mcp_tools");
 });
 
 test("status matrix is sanitized and width bounded", () => {

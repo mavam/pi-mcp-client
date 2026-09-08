@@ -9,7 +9,7 @@ const tool = (name: string) =>
     inputSchema: { type: "object", properties: {} },
   });
 function host(excluded: string[] = []) {
-  let active = ["read", "mcp_search"];
+  let active = ["read", "mcp_tools"];
   const registered = new Set(active);
   const api = {
     getActiveTools: () => [...active],
@@ -35,7 +35,7 @@ test("search activation is additive and idempotent", () => {
   expect(exposure.load([b]).added).toEqual([b.nativeName]);
   expect(api.getActiveTools()).toEqual([
     "read",
-    "mcp_search",
+    "mcp_tools",
     a.nativeName,
     b.nativeName,
   ]);
@@ -58,9 +58,9 @@ test("branch restoration removes only owned tools", () => {
     b = tool("b");
   exposure.load([a, b]);
   exposure.restore([a]);
-  expect(api.getActiveTools()).toEqual(["read", "mcp_search", a.nativeName]);
+  expect(api.getActiveTools()).toEqual(["read", "mcp_tools", a.nativeName]);
   exposure.restore([]);
-  expect(api.getActiveTools()).toEqual(["read", "mcp_search"]);
+  expect(api.getActiveTools()).toEqual(["read", "mcp_tools"]);
 });
 
 test("restores definitions from successful loader results, not other branches", () => {
@@ -71,13 +71,13 @@ test("restores definitions from successful loader results, not other branches", 
       type: "message",
       message: {
         role: "toolResult",
-        toolName: "mcp_search",
+        toolName: "mcp_tools",
         isError,
         details: { mcpClient: 1, loaded },
       },
     }) as unknown as SessionEntry;
   expect(restoredTools([entry([a]), entry([b], true)])).toEqual([a]);
   expect(restoredTools([entry([{ invalid: true }])])).toEqual([]);
-  const legacyBatch = Array.from({ length: 50 }, (_, i) => tool(`legacy_${i}`));
-  expect(restoredTools([entry(legacyBatch)])).toEqual(legacyBatch);
+  const batch = Array.from({ length: 50 }, (_, i) => tool(`tool_${i}`));
+  expect(restoredTools([entry(batch)])).toEqual(batch);
 });
