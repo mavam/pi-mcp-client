@@ -1,0 +1,10 @@
+created: 2026-09-08
+title: Explicit MCP tool activation
+intro: >-
+  This release makes MCP tool use safer and more predictable by separating discovery
+  from explicit activation, while adding commands to enable or disable servers without
+  editing configuration. It also improves the readability of expanded JSON results
+  in the user interface.
+source:
+  mode: sync-stable-queue
+  previous_stable: v0.2.0
