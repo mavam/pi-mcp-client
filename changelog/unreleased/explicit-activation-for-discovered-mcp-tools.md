@@ -3,7 +3,9 @@ title: Explicit activation for discovered MCP tools
 type: breaking
 authors:
   - mavam
-created: 2026-09-08T08:25:49.621698Z
+prs:
+  - 6
+created: 2026-09-08T08:28:55.957325Z
 ---
 
 `mcp_search({query: ...})` no longer loads tools, even when the query is an exact tool name. It returns candidates with short descriptions and required parameter names. Explicitly activate the identifiers you need before calling the native tools:
