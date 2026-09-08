@@ -15,6 +15,7 @@ export interface DisplayRow {
   label: string;
   description?: string;
   inlineDescription?: string;
+  inlineAction?: string;
   state: RowState;
 }
 /** Character offsets into the model-facing text, without duplicating payloads. */

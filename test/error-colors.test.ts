@@ -6,16 +6,21 @@ import { renderResult } from "../src/render.js";
 
 function recordingTheme() {
   const calls: [string, string][] = [];
+  const boldCalls: string[] = [];
   const theme = {
     fg: (color: string, text: string) => {
       calls.push([color, text]);
       return `\x1b[${color === "error" ? 31 : 34}m${text}\x1b[39m`;
     },
+    bold: (text: string) => {
+      boldCalls.push(text);
+      return `\x1b[1m${text}\x1b[22m`;
+    },
   } as unknown as Theme;
-  return { theme, calls };
+  return { theme, calls, boldCalls };
 }
 
-test("mixed discovery and activation results color only failed rows and their details as errors", () => {
+test("all result states keep descriptions dim and reserve error color for failed labels", () => {
   for (const expanded of [false, true]) {
     const { theme, calls } = recordingTheme();
     const states: RowState[] = ["candidate", "active", "queued", "running", "done", "failed", "cancelled"];
@@ -23,37 +28,43 @@ test("mixed discovery and activation results color only failed rows and their de
       mcpClient: 1,
       searchNotes: ["Catalog warning"],
       rows: states.map((state) => ({
-        state, label: `${state} label`, inlineDescription: `${state} reason`, description: `${state} detail`,
+        state, label: `${state} label`, inlineDescription: `${state} reason`, inlineAction: `${state} action`, description: `${state} detail`,
       })),
     };
     renderResult({ content: [], details }, { expanded, isPartial: false }, theme, false).render(120);
     for (const state of states) {
       expect(calls).toContainEqual([state === "failed" ? "error" : "accent", `${state} label`]);
-      expect(calls).toContainEqual([state === "failed" ? "error" : "dim", ` ${state} reason`]);
+      expect(calls).toContainEqual(["dim", ` ${state} reason`]);
+      expect(calls).toContainEqual(["dim", ` ${state} action`]);
       if (expanded)
-        expect(calls).toContainEqual([state === "failed" ? "error" : "dim", `  ${state} detail`]);
+        expect(calls).toContainEqual(["dim", `  ${state} detail`]);
     }
     expect(calls).toContainEqual(["warning", "Catalog warning"]);
   }
 });
 
-test("discovery diagnostics stay red when wrapped, truncated, and invalidated", () => {
-  const { theme } = recordingTheme();
-  const label = "cloudflare: [authentication_required] Authentication is required. Run /mcp auth cloudflare.";
+test("discovery diagnostics keep the server red and explanation dim", () => {
+  const { theme, calls, boldCalls } = recordingTheme();
+  const label = "cloudflare";
+  const inlineDescription = "Authentication is required.";
+  const inlineAction = "Run /mcp auth cloudflare.";
   for (const expanded of [false, true]) {
     const component = renderResult({
       content: [],
-      details: { mcpClient: 1, searchNotes: [], rows: [{ state: "failed", label }] },
+      details: { mcpClient: 1, searchNotes: [], rows: [{ state: "failed", label, inlineDescription, inlineAction }] },
     }, { expanded, isPartial: false }, theme, false);
     for (const width of [0, 1, 2, 10, 80, 240]) {
       const rows = component.render(width);
       expect(rows.every((row) => visibleWidth(row) <= width)).toBe(true);
-      expect(rows.join("\n")).not.toContain("\x1b[34m");
-      if (width >= 10) expect(rows.every((row) => row.includes("\x1b[31m"))).toBe(true);
       component.invalidate();
       expect(component.render(width)).toEqual(rows);
     }
   }
+  expect(calls).toContainEqual(["error", "cloudflare"]);
+  expect(calls).toContainEqual(["dim", ` ${inlineDescription}`]);
+  expect(calls).toContainEqual(["dim", ` ${inlineAction}`]);
+  expect(boldCalls.some((text) => text.includes(inlineAction))).toBe(true);
+  expect(calls.some(([, text]) => text.includes("cloudflare:") || text.includes("[authentication_required]"))).toBe(false);
 });
 
 test("local, framework, and native tool failures use error colors without losing JSON highlighting", async () => {
