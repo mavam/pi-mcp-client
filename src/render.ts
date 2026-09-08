@@ -92,7 +92,10 @@ export function renderResult(
         const value =
           theme.fg(status.color, status.glyph) +
           " " +
-          theme.fg("accent", line(row.label));
+          theme.fg("accent", line(row.label)) +
+          (row.inlineDescription
+            ? theme.fg("dim", `  ${line(row.inlineDescription)}`)
+            : "");
         const rendered = options.expanded && (!details?.searchNotes || row.state === "failed")
           ? new Text(value, 0, 0).render(width).map((x) => truncateToWidth(x, width))
           : [truncateToWidth(value, width)];

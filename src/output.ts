@@ -14,6 +14,7 @@ export type RowState = "candidate" | "queued" | "running" | "done" | "failed" | 
 export interface DisplayRow {
   label: string;
   description?: string;
+  inlineDescription?: string;
   state: RowState;
 }
 /** Character offsets into the model-facing text, without duplicating payloads. */

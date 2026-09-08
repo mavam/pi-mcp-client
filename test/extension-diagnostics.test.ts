@@ -82,6 +82,8 @@ test("discovery, including exact names, never registers, activates, or restores 
     expect(h.activeTools()).toEqual(["mcp_search", "unrelated"]);
     expect([...h.tools.keys()]).toEqual(["mcp_search"]);
     expect(result.details.candidates).toHaveLength(1);
+    expect(result.details.rows[0].label).toBe("example.echo");
+    expect(result.details.rows[0].inlineDescription).toBe("Echo text (required: text)");
     expect(result.details).not.toHaveProperty("loaded");
     expect(result.content[0].text).toContain("example.echo — Echo text (required: text)");
     expect(result.content[0].text).toEndWith('No tools activated. Call mcp_search({activate: [...]}) with the identifiers you need.');
@@ -109,6 +111,8 @@ test("activation needs no search, deduplicates aliases, and loads only explicit 
   expect(h.notifications.at(-1)).toContain("disconnected");
   const again = await h.execute("mcp_search", { activate: ["example.echo"] });
   expect(again.content[0].text).toContain("already loaded");
+  expect(again.details.rows).toEqual([{ label: "example.echo", state: "done" }]);
+  expect(result.details.rows[0]).toEqual({ label: "example.echo", state: "done" });
 });
 
 test("typos fail with catalog suggestions, while partial activation succeeds", async () => {

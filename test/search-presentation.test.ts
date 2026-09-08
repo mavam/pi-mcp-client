@@ -68,7 +68,7 @@ test("candidate rows and both call forms are neutral and width-safe", () => {
   const result = {
     content: [{ type: "text", text: "No tools activated." }],
     details: { mcpClient: 1, candidates: [], searchNotes: [], rows: [
-      { label: "linear.get_team — Fetch a team. (required: teamId) [loaded]", state: "candidate" },
+      { label: "linear.get_team", inlineDescription: "Fetch a team. (required: teamId) [loaded]", state: "candidate" },
     ] },
   };
   for (const expanded of [false, true]) {
@@ -83,6 +83,29 @@ test("candidate rows and both call forms are neutral and width-safe", () => {
       }
     }
   }
+});
+
+test("inline descriptions use gray without separators and successful activation needs no suffix", () => {
+  const colors: [string, string][] = [];
+  const recordingTheme = {
+    ...theme,
+    fg: (color: string, text: string) => { colors.push([color, text]); return text; },
+  } as Theme;
+  const rows = renderResult({
+    content: [],
+    details: { mcpClient: 1, searchNotes: [], rows: [
+      { label: "linear.get_team", inlineDescription: "Fetch a team.", state: "candidate" },
+      { label: "linear.get_team", state: "done" },
+      { label: "linear.bad", inlineDescription: "unknown identifier", state: "failed" },
+    ] },
+  }, { expanded: false, isPartial: false }, recordingTheme, false).render(80);
+  expect(rows).toEqual([
+    "○ linear.get_team  Fetch a team.",
+    "✔︎ linear.get_team",
+    "✘︎ linear.bad  unknown identifier",
+  ]);
+  expect(colors).toContainEqual(["accent", "linear.get_team"]);
+  expect(colors).toContainEqual(["dim", "  Fetch a team."]);
 });
 
 test("empty searches and native results retain useful output", () => {

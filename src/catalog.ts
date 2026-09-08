@@ -65,12 +65,13 @@ export function prepareTool(
 }
 
 /** Discovery exposes names, never a callable signature. */
-export function summarize(tool: CatalogTool): string {
+export function summarize(tool: CatalogTool, includeIdentifier = true): string {
   const schema = tool.inputSchema as Record<string, unknown>;
   const required = Array.isArray(schema.required)
     ? schema.required.filter((name): name is string => typeof name === "string")
     : [];
-  return `${tool.server}.${tool.name} — ${line(tool.description).slice(0, 180)} (required: ${required.map(line).join(", ") || "none"})`;
+  const prefix = includeIdentifier ? `${tool.server}.${tool.name} — ` : "";
+  return `${prefix}${line(tool.description).slice(0, 180)} (required: ${required.map(line).join(", ") || "none"})`;
 }
 
 function distance(a: string, b: string): number {

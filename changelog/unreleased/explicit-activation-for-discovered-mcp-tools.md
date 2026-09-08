@@ -5,7 +5,7 @@ authors:
   - mavam
 prs:
   - 6
-created: 2026-09-08T08:28:55.957325Z
+created: 2026-09-08T08:38:11.262107Z
 ---
 
 `mcp_search({query: ...})` no longer loads tools, even when the query is an exact tool name. It returns candidates with short descriptions and required parameter names. Explicitly activate the identifiers you need before calling the native tools:
@@ -16,3 +16,5 @@ mcp_search({ activate: ["linear.list_teams"] })
 ```
 
 First use of a capability now takes an extra step: discover, activate, then call. This prevents fuzzy search matches from becoming active tools. Activation accepts only exact identifiers, works without a prior search, and reports failures with nearby catalog names when available. Tools already loaded remain available, including those restored from older sessions.
+
+Discovery rows keep tool identifiers prominent and descriptions gray, without dash separators. Successful activation shows a checkmark and identifier without a redundant status suffix; failures retain their reason.

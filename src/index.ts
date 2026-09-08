@@ -315,7 +315,11 @@ export default function mcpClient(
           for (const tool of candidates) {
             const label = summarize(tool) + (active.has(tool.nativeName) ? " [loaded]" : "");
             messages.push(label);
-            details.rows.push({ label, state: "candidate" });
+            details.rows.push({
+              label: `${tool.server}.${tool.name}`,
+              inlineDescription: summarize(tool, false) + (active.has(tool.nativeName) ? " [loaded]" : ""),
+              state: "candidate",
+            });
           }
           if (!candidates.length) messages.push("No matching tools. Try a more specific capability, server, or exact tool name.");
           details.rows.push(...discovery.unavailable.map((label) => ({ label, state: "failed" as const })));
@@ -336,7 +340,11 @@ export default function mcpClient(
               : `unknown identifier${suggestions.length ? `; nearest catalog names: ${suggestions.join(", ")}` : "; no catalog names available for this server. Check the server identifier or discover candidates with query."}`;
             const label = `${line(identifier)} — ${ok ? added.includes(tool.nativeName) ? "loaded" : "already loaded" : `not loaded — ${reason}`}`;
             messages.push(label);
-            details.rows.push({ label, state: ok ? "done" : "failed" });
+            details.rows.push({
+              label: line(identifier),
+              ...(ok ? {} : { inlineDescription: reason }),
+              state: ok ? "done" : "failed",
+            });
           }
           if (loaded.length) messages.push("Call the loaded tools directly. Their full schemas are now available.");
           messages.push(...discovery.warnings);
