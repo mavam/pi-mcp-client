@@ -3,7 +3,9 @@ title: MCP server enable and disable commands
 type: feature
 authors:
   - mavam
-created: 2026-09-08T08:14:18.651705Z
+prs:
+  - 5
+created: 2026-09-08T08:16:18.064348Z
 ---
 
 You can now enable or disable MCP servers without editing JSON:
