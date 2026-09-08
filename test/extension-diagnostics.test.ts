@@ -555,6 +555,7 @@ test("native tools distinguish server-reported errors from cancelled calls", asy
   const cancelled = await h.execute(name, {});
   expect(cancelled.details.diagnostics[0].code).toBe("cancelled");
   expect(cancelled.details.rows[0].state).toBe("cancelled");
+  expect(cancelled.details.rows[0].label).toBe("Cancelled");
   expect(JSON.stringify(cancelled.content)).toContain("not replayed");
   expect(JSON.stringify(cancelled)).not.toContain("private-token");
 });

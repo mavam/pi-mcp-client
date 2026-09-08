@@ -48,7 +48,10 @@ function errorResult(error: unknown, context: DiagnosticContext) {
     failed: true,
     diagnostics: [value],
     rows: [
-      { label: message, state: value.code === "cancelled" ? "cancelled" : "failed" },
+      {
+        label: value.code === "cancelled" ? "Cancelled" : message,
+        state: value.code === "cancelled" ? "cancelled" : "failed",
+      },
     ],
   });
 }
