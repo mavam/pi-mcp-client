@@ -317,8 +317,8 @@ export default function mcpClient(
             messages.push(label);
             details.rows.push({
               label: `${tool.server}.${tool.name}`,
-              inlineDescription: summarize(tool, false) + (active.has(tool.nativeName) ? " [loaded]" : ""),
-              state: "candidate",
+              inlineDescription: summarize(tool, false),
+              state: active.has(tool.nativeName) ? "active" : "candidate",
             });
           }
           if (!candidates.length) messages.push("No matching tools. Try a more specific capability, server, or exact tool name.");

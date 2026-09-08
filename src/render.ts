@@ -8,6 +8,7 @@ import type { ClientDetails, RowState } from "./output.js";
 // Same glyphs and palette as Webfox's input status rows.
 const states = {
   candidate: { glyph: "○", color: "dim" },
+  active: { glyph: "●", color: "dim" },
   queued: { glyph: "●", color: "dim" },
   running: { glyph: "▶︎", color: "muted" },
   done: { glyph: "✔︎", color: "success" },

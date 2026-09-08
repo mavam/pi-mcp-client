@@ -64,6 +64,11 @@ calls **mcp activate**.
 
 ### Result display
 
+Discovery rows show `○` for inactive candidates and `●` for already active tools,
+without a status suffix. These reflect the state when discovery runs; earlier
+results don't update retroactively. Activation results use `✔︎` for success and
+`✘︎` for failure. Descriptions stay gray; identifiers remain prominent.
+
 Expand a tool result to see JSON objects and arrays formatted with two-space
 indentation and syntax highlighting. Explicit JSON resource MIME types (including
 `application/*+json`) and structured content identify JSON without guessing.

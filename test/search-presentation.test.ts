@@ -76,14 +76,19 @@ test("candidate rows and both call forms are neutral and width-safe", () => {
   const result = {
     content: [{ type: "text", text: "No tools activated." }],
     details: { mcpClient: 1, candidates: [], searchNotes: [], rows: [
-      { label: "linear.get_team", inlineDescription: "Fetch a team. (required: teamId) [loaded]", state: "candidate" },
+      { label: "linear.get_team", inlineDescription: "Fetch a team. (required: teamId)", state: "candidate" },
+      { label: "linear.list_teams", inlineDescription: "List teams. (required: none)", state: "active" },
     ] },
   };
   for (const expanded of [false, true]) {
     for (const width of [0, 1, 2, 10, 80]) {
       const rows = renderResult(result, { expanded, isPartial: false }, theme, false).render(width);
       expect(rows.every((row) => visibleWidth(row) <= width)).toBe(true);
-      if (width === 80) expect(rows[0]).toStartWith("○ linear.get_team");
+      if (width === 80) {
+        expect(rows[0]).toStartWith("○ linear.get_team");
+        expect(rows[1]).toStartWith("● linear.list_teams");
+        expect(rows.join("\n")).not.toContain("[loaded]");
+      }
       for (const args of [{ query: "list teams" }, { activate: ["linear.get_team", "linear.list_teams"] }]) {
         const call = renderCall("mcp discover", args, theme, expanded).render(width);
         expect(call.every((row) => visibleWidth(row) <= width)).toBe(true);
@@ -103,12 +108,14 @@ test("inline descriptions use gray without separators and successful activation 
     content: [],
     details: { mcpClient: 1, searchNotes: [], rows: [
       { label: "linear.get_team", inlineDescription: "Fetch a team.", state: "candidate" },
+      { label: "linear.list_teams", inlineDescription: "List teams.", state: "active" },
       { label: "linear.get_team", state: "done" },
       { label: "linear.bad", inlineDescription: "unknown identifier", state: "failed" },
     ] },
   }, { expanded: false, isPartial: false }, recordingTheme, false).render(80);
   expect(rows).toEqual([
     "○ linear.get_team Fetch a team.",
+    "● linear.list_teams List teams.",
     "✔︎ linear.get_team",
     "✘︎ linear.bad unknown identifier",
   ]);

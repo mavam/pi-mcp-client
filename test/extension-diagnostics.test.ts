@@ -84,6 +84,7 @@ test("discovery, including exact names, never registers, activates, or restores 
     expect(result.details.candidates).toHaveLength(1);
     expect(result.details.rows[0].label).toBe("example.echo");
     expect(result.details.rows[0].inlineDescription).toBe("Echo text (required: text)");
+    expect(result.details.rows[0].state).toBe("candidate");
     expect(result.details).not.toHaveProperty("loaded");
     expect(result.content[0].text).toContain("example.echo — Echo text (required: text)");
     expect(result.content[0].text).toEndWith('No tools activated. Call mcp_tools({activate: [...]}) with the identifiers you need.');
@@ -92,6 +93,9 @@ test("discovery, including exact names, never registers, activates, or restores 
   await h.execute("mcp_tools", { activate: ["example.echo"] });
   const result = await h.execute("mcp_tools", { query: "example.echo" });
   expect(result.content[0].text).toContain("(required: text) [loaded]");
+  expect(result.details.rows[0]).toEqual({
+    label: "example.echo", inlineDescription: "Echo text (required: text)", state: "active",
+  });
   expect(result.details).not.toHaveProperty("loaded");
   const hint = h.hooks.get("before_agent_start")({ systemPrompt: "base" }).systemPrompt;
   expect(hint).toContain("discovery never activates");
