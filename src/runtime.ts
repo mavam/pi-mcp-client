@@ -373,7 +373,7 @@ export class McpRuntime {
           return tools;
         }
         throw new ToolContractError(
-          "MCP tool catalog kept changing. Search again.",
+          "MCP tool catalog kept changing. Retry discovery or activation.",
         );
       })()
         .catch((error) => {
@@ -388,9 +388,9 @@ export class McpRuntime {
     return waitFor(state.listing, signal);
   }
 
-  async discover(server?: string, signal?: AbortSignal): Promise<Discovery> {
-    if (server) this.definition(server);
-    const names = server
+  async discover(server?: string | string[], signal?: AbortSignal): Promise<Discovery> {
+    if (typeof server === "string") this.definition(server);
+    const names = Array.isArray(server) ? [...new Set(server)] : server
       ? [server]
       : Object.keys(this.config)
           .filter((name) => !this.config[name].disabled)
@@ -443,7 +443,7 @@ export class McpRuntime {
     const found = current.find((candidate) => candidate.name === tool.name);
     if (!found || found.schemaHash !== tool.schemaHash)
       throw new ToolContractError(
-        "MCP tool was removed or its schema changed. Run mcp_search to load its current definition.",
+        "MCP tool was removed or its schema changed. Use mcp_tools with activate and its exact identifier to activate its current definition.",
       );
     const client = await waitFor(this.client(tool.server), signal);
     try {

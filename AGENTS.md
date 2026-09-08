@@ -20,13 +20,17 @@ Pushing runs the quality gates automatically. To run them manually, use
 
 - Use Bun: `bun install`, `bun run check`, and `bun run build`.
 - Keep protocol and transport behavior in the official MCP SDK.
-- Keep model-facing discovery to one `mcp_search` tool. Search activates native
-  tools cumulatively; do not add an invocation proxy or per-prompt schema dumps.
+- Keep one model-facing `mcp_tools` tool: `{query, server?, limit?}` discovers
+  candidates only; `{activate: ["server.tool"]}` explicitly activates exact
+  identifiers cumulatively. Never activate fuzzy matches or exact-name queries.
+  Keep native invocation; do not add an invocation proxy or per-prompt schema dumps.
+- Validate mutually exclusive query/activation arguments before connecting.
+  Persist discovery as `details.candidates`; only activation writes `details.loaded`.
 - Preserve unrelated tools and respect Pi's tool restrictions.
 - Keep session state branch-local. Never persist credentials in session entries
   or catalog caches; OAuth credentials belong in the OS credential store.
 - Keep renderers compact and width-safe, using Webfox-style status glyphs.
-- Add tests for lifecycle changes, search activation, and error handling.
+- Add tests for lifecycle changes, discovery/activation separation, and error handling.
 - Do not publish or push unless explicitly requested.
 
 ## Release engineering

@@ -7,6 +7,8 @@ import type { ClientDetails, RowState } from "./output.js";
 
 // Same glyphs and palette as Webfox's input status rows.
 const states = {
+  candidate: { glyph: "○", color: "dim" },
+  active: { glyph: "●", color: "dim" },
   queued: { glyph: "●", color: "dim" },
   running: { glyph: "▶︎", color: "muted" },
   done: { glyph: "✔︎", color: "success" },
@@ -21,9 +23,11 @@ export function renderCall(
   expanded: boolean,
 ): Component {
   const values = object(args) ? args : {};
-  const preview = Object.entries(values)
-    .map(([key, value]) => `${line(key)}=${line(JSON.stringify(value) ?? "")}`)
-    .join(" ");
+  const preview = title === "mcp activate"
+    ? ""
+    : Object.entries(values)
+      .map(([key, value]) => `${line(key)}=${line(JSON.stringify(value) ?? "")}`)
+      .join(" ");
   return {
     render(width) {
       if (width <= 0) return [];
@@ -91,7 +95,10 @@ export function renderResult(
         const value =
           theme.fg(status.color, status.glyph) +
           " " +
-          theme.fg("accent", line(row.label));
+          theme.fg("accent", line(row.label)) +
+          (row.inlineDescription
+            ? theme.fg("dim", ` ${line(row.inlineDescription)}`)
+            : "");
         const rendered = options.expanded && (!details?.searchNotes || row.state === "failed")
           ? new Text(value, 0, 0).render(width).map((x) => truncateToWidth(x, width))
           : [truncateToWidth(value, width)];

@@ -29,14 +29,45 @@ Start a new Pi session and ask it to search Cloudflare's documentation. Use `/mc
 to inspect the connection. For authenticated services, see [OAuth](#oauth) or
 [secret commands](#secret-commands).
 
-Pi searches for the tools it needs, then calls those tools directly. Search
-loads up to five matching tools by default, or up to 50 with `limit`. Results
-use local BM25-based ranking, with tool names weighted more strongly than
-descriptions and support for prefix matching. Full schemas become available on
-the next model turn, without a separate describe step. Previously loaded tools
-remain available as the conversation continues.
+Pi discovers candidates, explicitly activates the tools it needs, then calls
+those tools natively. One `mcp_tools` tool supports both steps:
+
+```js
+// Discover candidates. Never activates, even for an exact-name query.
+mcp_tools({ query: "list teams", server: "linear", limit: 5 })
+
+// Activate exact identifiers. Never invokes.
+mcp_tools({ activate: ["linear.list_teams", "linear.get_team"] })
+```
+
+Pass exactly one of `query` or `activate`. The optional `server` and `limit`
+fields are valid only with `query`. Discovery returns up to five candidates by
+default, or up to 50 with `limit`. Each candidate shows its exact activation
+identifier, a short description, required parameter names only, and `[loaded]`
+if already active. Results use local BM25-based ranking, with tool names weighted
+more strongly than descriptions and support for prefix matching.
+
+Activation accepts 1–50 exact `server.tool` or `mcp__server__tool` identifiers,
+ignores duplicates, and works without a prior search. Typos never activate fuzzy
+matches: failures list nearby catalog names when available so the assistant can
+retry with an exact identifier. Each identifier reports `loaded`, `already loaded`,
+or `not loaded` with a reason. Partial success keeps the tools that loaded.
+
+Full schemas become available on the model turn after activation. First use of a
+capability now takes three turns—discover, activate, call—so a fuzzy search match
+can never become an active tool. Previously loaded tools remain available.
+
+`mcp_tools` replaces `mcp_search` without backward compatibility. Update explicit
+Pi tool allowlists to use `mcp_tools` and activate the tools you need again in
+existing sessions. The UI labels discovery calls **mcp discover** and activation
+calls **mcp activate**.
 
 ### Result display
+
+Discovery rows show `○` for inactive candidates and `●` for already active tools,
+without a status suffix. These reflect the state when discovery runs; earlier
+results don't update retroactively. Activation results use `✔︎` for success and
+`✘︎` for failure. Descriptions stay gray; identifiers remain prominent.
 
 Expand a tool result to see JSON objects and arrays formatted with two-space
 indentation and syntax highlighting. Explicit JSON resource MIME types (including
@@ -51,12 +82,13 @@ not the displayed link label.
 ### Session behavior
 
 - Tools accumulate rather than rotating with each prompt.
-- Resume and branch navigation restore tools acquired on the selected branch.
+- Resume and branch navigation restore tools activated through `mcp_tools` on
+  the selected branch. Discovery results never restore tools.
 - Compaction retains the acquired tool set. New sessions start fresh.
 - Pi uses native deferred loading where supported by the model and provider.
   Other providers receive the expanded tool list normally.
-- Search respects server filters and Pi's tool exclusions. An explicit tool
-  allowlist must include both `mcp_search` and the native tools you want to load.
+- Discovery respects server filters; activation also respects Pi's tool exclusions. An explicit tool
+  allowlist must include both `mcp_tools` and the native tools you want to load.
 
 ### Commands
 
@@ -78,8 +110,8 @@ connections open on demand. A dash (`—`) means the catalog hasn't been fetched
 not that the server has no tools. The **Loaded** column counts tools currently
 active for the assistant.
 
-After refreshing a changed schema, search for the tool again to load its current
-definition. Calls validate the live catalog before execution and refuse removed
+After refreshing a changed schema, activate the tool again with its exact
+identifier to load its current definition. Calls validate the live catalog before execution and refuse removed
 or changed tools. The extension does not retry failed tool invocations; after an
 interrupted call, check whether the operation completed before trying again.
 
@@ -159,12 +191,12 @@ Commands use `/bin/sh` on Unix or Pi's shell selection on Windows, inherit Pi's
 process environment, and run in the server's configured `cwd` (the project
 directory by default). They run once per connection, including reconnections,
 not during configuration loading, status display, or cached discovery. Cold
-searches can connect and therefore execute commands. Concurrent connection
+searches and activations can connect and therefore execute commands. Concurrent connection
 requests share the same resolution.
 
 The client trims stdout and rejects empty output, nonzero exits, output above
 64 KiB, and resolution taking more than 10 seconds (or a shorter `timeoutMs`).
-Session shutdown cancels pending commands. Cancelling an individual search stops
+Session shutdown cancels pending commands. Cancelling an individual search or activation stops
 waiting but leaves shared connection work running for other callers. The client
 discards command stderr and does not include resolved secrets in errors, session
 records, or catalog caches. Commands themselves remain responsible for avoiding
@@ -245,19 +277,21 @@ context. This command requires an interactive UI.
 
 Connections start on demand, never while the extension factory loads. A search
 without a cached catalog contacts configured servers, with at most four discoveries
-in flight. A server-scoped search only contacts that server. Failed servers are
-reported as unsearched, not mistaken for an empty catalog.
+in flight. A server-scoped search only contacts that server. Activation discovers
+only the servers named by its identifiers, with the same concurrency bound.
+Failed servers are reported as unavailable, not mistaken for an empty catalog.
 
 Catalogs are cached privately under `~/.pi/agent/cache/pi-mcp-client/`, keyed by
 server configuration and working directory. Disk caches expire after 24 hours.
-They contain tool metadata, not configured credentials. Cached search needs no
-connection; invocation refreshes the live catalog before calling the tool.
+They contain tool metadata, not configured credentials. Cached discovery and
+activation need no connection; invocation refreshes the live catalog before
+calling the tool.
 Connections remain open until shutdown or explicit reconnection.
 
 When a connected server reports a tool-list change, the extension invalidates its
-memory and disk catalogs. The next search fetches the current list, including new
-or removed tools. Notifications don't replace active tool definitions: changed
-schemas require another `mcp_search` before use. Disconnected, cache-only searches
+memory and disk catalogs. The next discovery or activation fetches the current
+list, including new or removed tools. Notifications don't replace active tool
+definitions: changed schemas require another `mcp_tools({activate: [...]})` before use. Disconnected, cache-only searches
 can't receive notifications and still use the 24-hour disk-cache expiry.
 
 ### OAuth
@@ -284,8 +318,9 @@ Only load configuration you trust. Server executables and secret commands run
 with your user permissions; trusted project configuration can replace global
 connections and settings.
 
-Server metadata is untrusted. Search activates tools but does not approve their
-side effects or provide per-call confirmation. Use tool filters and Pi permission
+Server metadata is untrusted. Discovery never activates tools. Explicit
+activation exposes schemas but does not approve tool side effects or provide
+per-call confirmation. Use tool filters and Pi permission
 extensions for additional controls. Cancelling a call does not guarantee that the
 server rolled back its effects.
 
@@ -326,7 +361,7 @@ unavailable server is not an empty catalog.
 | `connection_failed` | Server executable, working directory, endpoint, network, and TLS configuration. |
 | `timeout` | Server responsiveness and the applicable request, secret-command, or OAuth time limit. |
 | `protocol_error` | Server compatibility and the `protocol` setting. |
-| `tool_changed` | Server filters and the current tool schema; search again. Reload Pi if connection configuration changed. |
+| `tool_changed` | Server filters and the current tool schema; activate the exact identifier again. Reload Pi if connection configuration changed. |
 | `tool_error` | The server's tool result and inputs; verify the outcome before retrying. |
 | `oauth_failed` | Browser access to the callback and support for dynamically registered public clients. |
 | `callback_unavailable` | Another process using local port 19847. |
