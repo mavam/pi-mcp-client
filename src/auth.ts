@@ -10,14 +10,37 @@ import {
   type StoredOAuthClientInformation,
   type StoredOAuthTokens,
 } from "@modelcontextprotocol/client";
-import { fingerprint, object } from "./config.js";
+import { fingerprint, object, type ClientOptions } from "./config.js";
+import { oauthCallbackHtml } from "./oauth-page.js";
 import { diagnose, DiagnosticError, failure } from "./diagnostics.js";
 
 const REDIRECT = "http://127.0.0.1:19847/callback";
+export type OAuthOptions = Pick<ClientOptions, "oauthScopes" | "oauthCallbackPort">;
+export function callbackUrl(options: OAuthOptions = {}): string {
+  return `http://127.0.0.1:${options.oauthCallbackPort ?? 19847}/callback`;
+}
+
+/** Validate the full handoff URL before giving the response to the SDK. */
+export function parseCallback(value: string, redirect: string, state: string): URLSearchParams {
+  const invalid = () => failure("oauth_failed", { operation: "auth" });
+  if (value.length > 16_384 || /[\u0000-\u0020\u007f]/u.test(value)) throw invalid();
+  let target: URL;
+  try { target = new URL(value); } catch { throw invalid(); }
+  const expected = new URL(redirect);
+  const params = target.searchParams;
+  if (target.origin !== expected.origin || target.pathname !== expected.pathname ||
+      target.username || target.password || target.hash ||
+      [...params.keys()].some((key) => params.getAll(key).length !== 1) ||
+      params.get("state") !== state ||
+      (params.has("code") === params.has("error")) ||
+      !(params.get("code") || params.get("error"))) throw invalid();
+  return params;
+}
 interface Credentials {
   url: string;
   clientId?: string;
   clients: Record<string, StoredOAuthClientInformation>;
+  registrations?: Record<string, { redirect: string; scope?: string }>;
   tokens?: StoredOAuthTokens;
 }
 export interface SecretStore {
@@ -57,15 +80,8 @@ export async function credentialStore(url: string, clientId?: string): Promise<S
 }
 
 export class OAuthProvider implements OAuthClientProvider {
-  readonly redirectUrl = REDIRECT;
-  readonly clientMetadata: OAuthClientMetadata = {
-    client_name: "Pi MCP Client",
-    redirect_uris: [REDIRECT],
-    grant_types: ["authorization_code", "refresh_token"],
-    response_types: ["code"],
-    token_endpoint_auth_method: "none",
-    application_type: "native",
-  };
+  readonly redirectUrl: string;
+  readonly clientMetadata: OAuthClientMetadata;
   private data: Credentials;
   private snapshot: string | null;
   private readonly epoch: number;
@@ -78,7 +94,18 @@ export class OAuthProvider implements OAuthClientProvider {
     private readonly store: SecretStore,
     private readonly redirect?: (url: URL) => void | Promise<void>,
     private readonly clientId?: string,
+    options: OAuthOptions = {},
   ) {
+    this.redirectUrl = callbackUrl(options);
+    this.clientMetadata = {
+      client_name: "Pi MCP Client",
+      redirect_uris: [this.redirectUrl],
+      grant_types: ["authorization_code", "refresh_token"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+      application_type: "native",
+      ...(options.oauthScopes ? { scope: options.oauthScopes.join(" ") } : {}),
+    };
     this.key = credentialKey(url, clientId);
     this.epoch = credentialEpochs.get(this.key) ?? 0;
     const raw = store.read();
@@ -115,7 +142,16 @@ export class OAuthProvider implements OAuthClientProvider {
     this.assertCurrent();
     if (!ctx) return undefined;
     const stored = Object.hasOwn(this.data.clients, ctx.issuer) ? this.data.clients[ctx.issuer] : undefined;
-    if (!this.clientId) return stored;
+    if (!this.clientId) {
+      // Fresh explicit grants must use a registration matching the requested
+      // callback and scopes. Refresh/logout still use the stored client.
+      const registration = this.data.registrations?.[ctx.issuer];
+      if (this.redirect && stored &&
+          ((registration?.redirect ?? REDIRECT) !== this.redirectUrl ||
+            registration?.scope !== this.clientMetadata.scope))
+        return undefined;
+      return stored;
+    }
     // A configured public ID is not a secret, but a successful grant pins it to
     // its issuer. Require explicit logout before trusting a replacement issuer.
     if ((this.data.tokens?.issuer && this.data.tokens.issuer !== ctx.issuer) ||
@@ -130,7 +166,15 @@ export class OAuthProvider implements OAuthClientProvider {
     if (!ctx) throw new Error("OAuth client registration has no issuer.");
     if (this.clientId && (info.client_id !== this.clientId || info.client_secret))
       throw new Error("Cannot replace the configured public OAuth client.");
+    const previous = this.data.clients[ctx.issuer];
+    if (!this.clientId && previous && previous.client_id !== info.client_id &&
+        this.data.tokens?.issuer === ctx.issuer)
+      delete this.data.tokens; // A replacement registration cannot refresh the old client's grant.
     this.data.clients = { ...this.data.clients, [ctx.issuer]: info };
+    if (!this.clientId) this.data.registrations = {
+      ...this.data.registrations,
+      [ctx.issuer]: { redirect: this.redirectUrl, scope: this.clientMetadata.scope },
+    };
     this.save();
   }
   tokens(ctx?: OAuthClientInformationContext) {
@@ -174,7 +218,10 @@ export class OAuthProvider implements OAuthClientProvider {
     await this.redirect(url);
   }
   invalidateCredentials(scope: "all" | "client" | "tokens" | "verifier" | "discovery") {
-    if (scope === "all" || scope === "client") this.data.clients = {};
+    if (scope === "all" || scope === "client") {
+      this.data.clients = {};
+      delete this.data.registrations;
+    }
     if (scope === "all" || scope === "tokens") delete this.data.tokens;
     if (scope === "all" || scope === "verifier") this.verifier = undefined;
     if (scope === "all" || scope === "discovery") this.discovery = undefined;
@@ -247,6 +294,15 @@ export async function logout(
   }
 }
 
+function waitFor<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) abort();
+    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
+}
+
 /** Explicit user action only; OAuth never opens a browser during search or execution. */
 export async function authenticate(
   url: string,
@@ -254,13 +310,10 @@ export async function authenticate(
   signal?: AbortSignal,
   store?: SecretStore,
   clientId?: string,
+  options: OAuthOptions & {
+    handoff?: (authorizationUrl: string, signal: AbortSignal) => Promise<string | undefined>;
+  } = {},
 ): Promise<void> {
-  const provider = new OAuthProvider(
-    url,
-    store ?? (await credentialStore(url, clientId)),
-    (target) => open(target.href),
-    clientId,
-  );
   const deadline = AbortSignal.any([
     AbortSignal.timeout(120_000),
     ...(signal ? [signal] : []),
@@ -269,20 +322,39 @@ export async function authenticate(
   const callback = new Promise<URLSearchParams>((resolve) => {
     resolveCallback = resolve;
   });
-  const server = createServer((req, res) => {
-    const target = new URL(req.url ?? "/", REDIRECT);
-    if (
-      req.method !== "GET" ||
-      target.pathname !== "/callback" ||
-      target.searchParams.get("state") !== provider.expectedState
-    ) {
-      res.writeHead(400).end("Invalid OAuth callback.");
+  const provider = new OAuthProvider(
+    url,
+    store ?? (await credentialStore(url, clientId)),
+    async (target) => {
+      deadline.throwIfAborted();
+      if (!options.handoff) return open(target.href);
+      const value = await waitFor(options.handoff(target.href, deadline), deadline);
+      deadline.throwIfAborted();
+      if (value === undefined) throw failure("cancelled", { operation: "auth" });
+      resolveCallback(parseCallback(value.trim(), provider.redirectUrl, provider.expectedState));
+    },
+    clientId,
+    options,
+  );
+  let received = false;
+  const server = options.handoff ? undefined : createServer((req, res) => {
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Referrer-Policy", "no-referrer");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'");
+    let params: URLSearchParams;
+    try {
+      if (received || req.method !== "GET" || req.headers.host !== new URL(provider.redirectUrl).host ||
+          !req.url?.startsWith("/callback?")) throw new Error("Invalid callback");
+      params = parseCallback(new URL(req.url, provider.redirectUrl).href, provider.redirectUrl, provider.expectedState);
+    } catch {
+      res.writeHead(400).end(oauthCallbackHtml("invalid"));
       return;
     }
-    res.setHeader("Content-Type", "text/plain; charset=utf-8");
-    res.setHeader("Cache-Control", "no-store");
-    res.end("Authorization response received. Return to Pi.");
-    resolveCallback(target.searchParams);
+    received = true;
+    res.end(oauthCallbackHtml(params.has("error") ? "denied" : "received"));
+    resolveCallback(params);
   });
   const fetchFn = (input: string | URL | Request, init?: RequestInit) =>
     fetch(input, {
@@ -290,26 +362,19 @@ export async function authenticate(
       signal: AbortSignal.any([deadline, ...(init?.signal ? [init.signal] : [])]),
     });
   try {
-    await new Promise<void>((resolve, reject) => {
+    deadline.throwIfAborted();
+    if (server) await new Promise<void>((resolve, reject) => {
       server.once("error", reject);
-      server.listen(19847, "127.0.0.1", resolve);
+      server.listen(options.oauthCallbackPort ?? 19847, "127.0.0.1", resolve);
     });
     deadline.throwIfAborted();
     // Explicit login offers a fresh grant, rather than silently refreshing the old one.
-    const result = await auth(provider, { serverUrl: url, fetchFn, forceReauthorization: true });
-    if (result === "AUTHORIZED") return;
-    const params = await new Promise<URLSearchParams>((resolve, reject) => {
-      const abort = () =>
-        reject(
-          failure(signal?.aborted ? "cancelled" : "timeout", { operation: "auth" }),
-        );
-      deadline.addEventListener("abort", abort, { once: true });
-      if (deadline.aborted) abort();
-      void callback.then((value) => {
-        deadline.removeEventListener("abort", abort);
-        resolve(value);
-      });
+    const result = await auth(provider, {
+      serverUrl: url, fetchFn, forceReauthorization: true,
+      scope: options.oauthScopes?.join(" "),
     });
+    if (result === "AUTHORIZED") return;
+    const params = await waitFor(callback, deadline);
     if (params.has("error") || !params.get("code"))
       throw new Error("OAuth authorization was not granted.");
     const { StreamableHTTPClientTransport } = await import(
@@ -327,7 +392,9 @@ export async function authenticate(
   } catch (error) {
     throw new DiagnosticError(diagnose(error, { operation: "auth", signal: deadline }));
   } finally {
-    server.closeAllConnections();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    if (server) {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   }
 }

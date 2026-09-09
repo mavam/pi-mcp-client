@@ -9,6 +9,8 @@ export interface ClientOptions {
   description?: string;
   oauth?: boolean;
   oauthClientId?: string;
+  oauthScopes?: string[];
+  oauthCallbackPort?: number;
   disabled?: boolean;
   includeTools?: string[];
   excludeTools?: string[];
@@ -35,6 +37,8 @@ const OPTION_FIELDS = [
   "description",
   "oauth",
   "oauthClientId",
+  "oauthScopes",
+  "oauthCallbackPort",
   "disabled",
   "includeTools",
   "excludeTools",
@@ -64,6 +68,17 @@ function validateOptions(
         !entry.oauthClientId.trim() || entry.oauthClientId.length > 4096 ||
         /[\u0000-\u001f\u007f]/u.test(entry.oauthClientId)))
     fail("oauthClientId (requires oauth: true and a nonempty client ID)");
+  if (entry.oauthScopes !== undefined &&
+      (entry.oauth !== true || !Array.isArray(entry.oauthScopes) ||
+        entry.oauthScopes.length === 0 || entry.oauthScopes.length > 100 ||
+        !entry.oauthScopes.every((scope: unknown) => typeof scope === "string" &&
+          scope.length <= 256 && /^[\x21\x23-\x5b\x5d-\x7e]+$/u.test(scope)) ||
+        new Set(entry.oauthScopes).size !== entry.oauthScopes.length))
+    fail("oauthScopes (requires oauth: true and 1–100 unique OAuth scope tokens)");
+  if (entry.oauthCallbackPort !== undefined &&
+      (entry.oauth !== true || !Number.isInteger(entry.oauthCallbackPort) ||
+        Number(entry.oauthCallbackPort) < 1 || Number(entry.oauthCallbackPort) > 65535))
+    fail("oauthCallbackPort (requires oauth: true and a port from 1–65535)");
   for (const key of ["oauth", "disabled"]) {
     if (entry[key] !== undefined && typeof entry[key] !== "boolean") fail(key);
   }

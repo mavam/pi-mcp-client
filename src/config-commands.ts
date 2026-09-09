@@ -1,6 +1,6 @@
 import { ConfigMutationError, type ConfigMutation, type ConfigScope, type ServerConfig } from "./config.js";
 
-export const ADD_USAGE = "Usage: /mcp add --scope global|project [--replace] [--transport http|stdio] [--header 'Name: value'] [--env KEY=value] [--oauth] [--oauth-client-id ID] <server> <url> OR <server> -- <command> [args...]. Put options before the server name.";
+export const ADD_USAGE = "Usage: /mcp add --scope global|project [--replace] [--transport http|stdio] [--header 'Name: value'] [--env KEY=value] [--oauth] [--oauth-client-id ID] [--oauth-scope SCOPE] [--oauth-callback-port PORT] <server> <url> OR <server> -- <command> [args...]. Put options before the server name.";
 export const REMOVE_USAGE = "Usage: /mcp remove --scope global|project <server>. Credentials are retained; log out first if you want to remove them.";
 
 /** Shell-like quoting only: no variable, command, glob, or shell expansion. */
@@ -57,7 +57,7 @@ export function parseConfigCommand(input: string): Exclude<ConfigMutation, { act
   let index = 1;
   while (words[index]?.startsWith("--")) {
     const flag = words[index++];
-    if (seen.has(flag) && flag !== "--header" && flag !== "--env") fail();
+    if (seen.has(flag) && flag !== "--header" && flag !== "--env" && flag !== "--oauth-scope") fail();
     seen.add(flag);
     if (flag === "--replace" && action === "add") { replace = true; continue; }
     if (flag === "--oauth" && action === "add") { definition.oauth = true; continue; }
@@ -72,6 +72,11 @@ export function parseConfigCommand(input: string): Exclude<ConfigMutation, { act
       transport = value as "http" | "stdio";
     } else if (flag === "--oauth-client-id") {
       definition.oauthClientId = value;
+    } else if (flag === "--oauth-scope") {
+      definition.oauthScopes = [...(definition.oauthScopes ?? []), value];
+    } else if (flag === "--oauth-callback-port") {
+      if (!/^[0-9]+$/u.test(value) || Number(value) < 1 || Number(value) > 65535) fail();
+      definition.oauthCallbackPort = Number(value);
     } else if (flag === "--env") {
       const match = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/su.exec(value);
       if (!match || Object.hasOwn(definition.env ?? {}, match[1])) fail();
@@ -93,7 +98,7 @@ export function parseConfigCommand(input: string): Exclude<ConfigMutation, { act
     if (transport === "http") fail();
     definition.command = words[++index];
     definition.args = words.slice(index + 1);
-    if (!definition.command || definition.oauth || definition.oauthClientId || definition.headers) fail();
+    if (!definition.command || definition.oauth || definition.oauthClientId || definition.oauthScopes || definition.oauthCallbackPort || definition.headers) fail();
   } else {
     if (transport === "stdio" || index + 1 !== words.length || definition.env) fail();
     definition.url = words[index];
@@ -116,7 +121,7 @@ export function configCommandCompletions(input: string, servers: string[]) {
   const args = /^--scope\s+(global|project)\s+([^\s]*)$/u.exec(rest);
   if (!args) return [];
   const [, scope, partial] = args;
-  const values = action === "remove" ? servers.sort() : ["--replace", "--transport", "--header", "--env", "--oauth", "--oauth-client-id"];
+  const values = action === "remove" ? servers.sort() : ["--replace", "--transport", "--header", "--env", "--oauth", "--oauth-client-id", "--oauth-scope", "--oauth-callback-port"];
   return values.filter((value) => value.startsWith(partial)).map((value) => ({
     value: `${action} --scope ${scope} ${value}`, label: value,
   }));

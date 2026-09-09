@@ -124,7 +124,7 @@ export const connectSdk: ConnectFactory = async (
     : new StreamableHTTPClientTransport(new URL(config.url!), {
         requestInit: { headers: config.headers },
         authProvider: config.oauth
-          ? new OAuthProvider(config.url!, await credentialStore(config.url!, config.oauthClientId), undefined, config.oauthClientId)
+          ? new OAuthProvider(config.url!, await credentialStore(config.url!, config.oauthClientId), undefined, config.oauthClientId, config)
           : undefined,
         // Bound HTTP responses (including OAuth), but not established SSE streams.
         // The SDK bounds ordinary MCP requests with their request timeout.

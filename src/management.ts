@@ -142,6 +142,10 @@ export function inspectServer(
     `Transport: ${config.command ? "stdio" : "HTTP"}`,
     `Protocol: ${config.protocol ?? "auto"}`,
     `OAuth: ${config.oauth ? "enabled" : "disabled"}`,
+    ...(config.oauth ? [
+      `Requested scopes: ${config.oauthScopes?.map(line).join(", ") ?? "SDK/server defaults"}`,
+      `OAuth callback: http://127.0.0.1:${config.oauthCallbackPort ?? 19847}/callback`,
+    ] : []),
     ...(authentication ? [`Authentication: ${authentication}`] : []),
     `Timeout: ${config.timeoutMs ? `${config.timeoutMs} ms` : "default"}`,
     ...(config.command

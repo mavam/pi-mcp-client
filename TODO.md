@@ -22,8 +22,8 @@ stays redacted, discovery never activates tools, and authentication stays explic
 - [x] **Configuration commands:** `/mcp add` and `/mcp remove` require explicit
   scope selection and validate before saving. Adding never executes a server;
   removing configuration retains credentials and is distinct from disabling.
-- [ ] **OAuth options:** Evaluate requested scopes, configurable callback ports,
-  and browser-free callback handoff. Keep non-interactive refusal explicit.
+- [x] **OAuth options:** Requested scopes, configurable loopback callback ports,
+  and browser-free callback handoff. Non-interactive login is explicitly refused.
 
 References: [Codex CLI](https://developers.openai.com/codex/cli/reference#codex-mcp)
 and [Claude Code MCP](https://code.claude.com/docs/en/mcp).
@@ -85,9 +85,9 @@ and [Claude Code MCP](https://code.claude.com/docs/en/mcp).
 
 ## Compatibility and operations
 
-- [ ] **Remote/headless OAuth:** Support an explicit callback handoff or remote
-  authentication workflow, rather than assuming the browser can reach Pi's local
-  loopback listener.
+- [x] **Remote/headless OAuth:** Explicit interactive callback handoff with
+  `/mcp login <server> --no-browser`, without assuming the browser can reach Pi's
+  local loopback listener. Unattended login remains unsupported.
 - [ ] **Legacy SSE:** Evaluate an explicitly selected legacy transport for existing
   deployments. Keep Streamable HTTP as the recommended HTTP transport and never
   reinterpret an unsupported transport silently.

@@ -102,7 +102,7 @@ not the displayed link label.
 | `/mcp reload` | Apply configuration changes without restarting Pi. |
 | `/mcp enable <server>` | Enable a server in its effective configuration file. |
 | `/mcp disable <server>` | Disable a server, close its connection, and deactivate its tools. |
-| `/mcp login <server>` | Authenticate an OAuth-enabled HTTP server. |
+| `/mcp login <server> [--no-browser]` | Authenticate an OAuth-enabled HTTP server; optionally paste the callback URL in an interactive dialog. |
 | `/mcp logout <server>` | Remove local OAuth credentials and attempt remote revocation, including for disabled servers. |
 | `/mcp reconnect <server>` | Replace a connection and refresh its catalog. |
 | `/mcp refresh <server>` | Refresh a server's catalog without loading additional tools. |
@@ -231,6 +231,8 @@ Put descriptions, authentication choices, filters, and timeouts directly in each
 | `description` | Short capability description for Pi's server directory. |
 | `oauth` | Set to `true` to use OAuth instead of an Authorization header on an HTTP connection. |
 | `oauthClientId` | Optional pre-registered public client ID. Requires `oauth: true`; supports `${ENV_VAR}` interpolation, not secret commands. |
+| `oauthScopes` | Optional array of 1–100 unique OAuth scope tokens to request at login. Requires `oauth: true`; omitted scopes use SDK/server defaults. Values are literal, without interpolation. |
+| `oauthCallbackPort` | Optional loopback callback port, from 1 to 65535. Defaults to `19847`. Requires `oauth: true`. |
 | `disabled` | Prevent this server from connecting or exposing tools. |
 | `includeTools` | Optional allowlist of original MCP tool names; `*` matches any sequence. An empty list exposes nothing. |
 | `excludeTools` | Denylist applied after `includeTools`. |
@@ -310,6 +312,8 @@ Additional options:
 | `--env KEY=value` | Add a stdio environment override. Repeat for different variable names. |
 | `--oauth` | Enable OAuth for an HTTP server. |
 | `--oauth-client-id ID` | Use a pre-registered public client. Requires `--oauth`. |
+| `--oauth-scope SCOPE` | Request an OAuth scope. Repeat for additional scopes. Requires `--oauth`. |
+| `--oauth-callback-port PORT` | Set the loopback callback port. Requires `--oauth`. |
 
 For example, retain an environment reference rather than typing a token:
 
@@ -400,10 +404,13 @@ may need to reconnect; logout cannot recall requests already sent to a server.
 No browser opens until you explicitly run `/mcp login <server>`.
 
 Public clients can use dynamic registration or a pre-registered client ID. Both
-use PKCE and a local callback at `http://127.0.0.1:19847/callback`. The browser must
-be able to reach that address on the Pi machine. Authentication times out after
-two minutes; you can cancel it with Escape in the terminal UI. Explicit login
-always opens the authorization flow, even if a refresh token is already stored.
+use PKCE and a loopback callback at `http://127.0.0.1:19847/callback` by default.
+Normal login opens a local listener that the browser must be able to reach.
+Authentication times out after two minutes; you can cancel it with Escape in the
+terminal UI. Explicit login always starts a fresh authorization flow, even if a
+refresh token is already stored. The browser callback page identifies **Pi MCP
+Client** and asks you to return to Pi; receiving a callback doesn't yet mean the
+token exchange succeeded.
 
 For a server without dynamic registration, register a **public/native** client
 with the service, using that exact callback URL and token endpoint authentication
@@ -432,8 +439,72 @@ credentials. After the first successful grant, a pre-registered client is pinned
 to its authorization-server issuer. If that issuer changes, verify the server
 configuration before logging out and logging in again to trust the replacement.
 
-Client secrets, custom callback ports, remote callback pasting, and headless
-interactive OAuth are not supported yet. Use bearer headers for headless access.
+#### Requested scopes and callback ports
+
+Configure scopes and a callback port in the server definition:
+
+```json
+{
+  "mcpServers": {
+    "example": {
+      "url": "https://mcp.example.com/mcp",
+      "oauth": true,
+      "oauthScopes": ["read", "write"],
+      "oauthCallbackPort": 19848
+    }
+  }
+}
+```
+
+Or set them when adding the server:
+
+```text
+/mcp add --scope global --oauth --oauth-scope read --oauth-scope write --oauth-callback-port 19848 example https://mcp.example.com/mcp
+```
+
+The callback becomes `http://127.0.0.1:19848/callback`. Pre-registered clients must
+allow that exact URL. The listener stays bound to loopback; arbitrary callback
+hosts and paths aren't supported. If the port is occupied, choose another port or
+use manual login.
+
+Scopes are case-sensitive OAuth tokens, each up to 256 characters, without spaces,
+quotes, or backslashes. Omit `oauthScopes` to retain SDK/server-driven selection;
+an empty array is rejected. The SDK may also request `offline_access` when the
+service advertises refresh-token support. Requested scopes aren't a guarantee of
+granted permissions or a per-tool permission policy.
+
+After changing these options, run `/mcp reload`, then `/mcp login example`.
+Changing configuration never starts authorization or revokes existing grants.
+Scopes and callback ports don't select separate credential stores: definitions
+sharing a URL and client ID still share credentials. Explicit login renews a
+dynamic registration when its requested options change. `/mcp get example` shows
+the requested scopes and callback address without connecting.
+
+#### Manual and remote login
+
+When Pi runs over SSH, or you don't want it to launch a browser, use:
+
+```text
+/mcp login example --no-browser
+```
+
+1. Open the authorization URL shown in Pi's interactive dialog in your browser.
+2. Complete sign-in. The browser may show a connection error at the loopback
+   callback address; this is expected when the browser and Pi run on different
+   machines.
+3. Copy the full callback URL from the browser's address bar and paste it into
+   the **Callback URL** dialog in Pi, not into chat or a slash command.
+
+Manual login doesn't open a browser or bind a callback port. Pi validates the
+callback address, state, and authorization response before exchanging the code.
+Authorization URLs and pasted callbacks aren't written to session entries,
+catalogs, notifications, or logs by this extension. Treat the callback URL as
+sensitive; your browser history and clipboard may still contain it.
+
+`--no-browser` still requires an interactive UI and an available OS credential
+store. It isn't unattended authentication: print and JSON modes refuse OAuth
+login. Use externally managed bearer headers for unattended access. Confidential
+clients requiring a client secret aren't supported yet.
 
 ### Trust and permissions
 
@@ -488,7 +559,7 @@ unavailable server is not an empty catalog.
 | `tool_error` | The server's tool result and inputs; verify the outcome before retrying. |
 | `oauth_failed` | Browser access to the callback and support for public clients, using dynamic registration or the configured client ID. |
 | `oauth_issuer_changed` | Verify the authorization-server change before logging out and logging in again. |
-| `callback_unavailable` | Another process using local port 19847. |
+| `callback_unavailable` | Another process using the configured loopback port (default 19847). Change `oauthCallbackPort` or use `/mcp login <server> --no-browser`. |
 | `busy` | Wait for discovery to finish before reconnecting. |
 | `cancelled` | Retry when ready; verify any interrupted tool operation first. |
 | `operation_failed` | An unclassified failure; inspect server status and configuration. |
