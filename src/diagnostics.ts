@@ -1,6 +1,8 @@
 import {
   OAuthClientFlowError,
   OAuthError,
+  RegistrationRejectedError,
+  InsecureTokenEndpointError,
   ProtocolError,
   ProtocolErrorCode,
   ResourceNotFoundError,
@@ -32,6 +34,14 @@ const messages = {
   subscription_limit: "The connection has reached its limit of 50 resource subscriptions.",
   catalog_changed: "The catalog kept changing during discovery.",
   oauth_failed: "OAuth authentication did not complete.",
+  oauth_client_required: "OAuth requires a registered client: this server does not support dynamic client registration.",
+  oauth_registration_rejected: "The authorization server rejected OAuth client registration.",
+  oauth_client_rejected: "The authorization server rejected the OAuth client or its authentication method.",
+  oauth_pkce_unsupported: "The authorization server does not support the required S256 PKCE method.",
+  oauth_scope_rejected: "The authorization server rejected the requested OAuth scopes.",
+  oauth_grant_rejected: "The OAuth authorization code or refresh token was rejected.",
+  oauth_redirect_rejected: "The authorization server rejected the OAuth callback URL.",
+  oauth_endpoint_insecure: "The OAuth token endpoint is not secure.",
   oauth_issuer_changed: "The OAuth authorization server changed.",
   callback_unavailable: "The local OAuth callback port is unavailable.",
   busy: "Discovery is still running.",
@@ -107,7 +117,15 @@ export function diagnostic(
     subscriptions_unsupported: "Choose a server with resource subscription support, or read the resource explicitly when needed.",
     subscription_limit: "Unsubscribe from another resource before adding a new watch.",
     catalog_changed: "Retry discovery once the server catalog has settled.",
-    oauth_failed: `Check OAuth support, the configured public client ID, and callback access. Retry /mcp login ${target}, or use /mcp login ${target} --no-browser for manual callback handoff.`,
+    oauth_failed: `Check the service's OAuth requirements and /mcp get ${target} for the client type, requested scopes, and callback address. Only public clients with PKCE are supported; clients requiring a client secret are not. Retry /mcp login ${target} after correcting the setup.`,
+    oauth_client_required: `Configure oauthClientId with a registered public/PKCE client ID in this server's definition. Register the exact callback URL shown by /mcp get ${target}, then run /mcp reload and /mcp login ${target}. Clients requiring a client secret are not supported. --no-browser does not fix client registration.`,
+    oauth_registration_rejected: `Check whether the service allows public/native client registration and the callback URL shown by /mcp get ${target}. If registration is restricted, configure an approved public client with oauthClientId, run /mcp reload, then retry /mcp login ${target}.`,
+    oauth_client_rejected: `Verify oauthClientId, the app's approval, and support for public-client authentication (token endpoint method none). Clients requiring a client secret are not supported. After configuration changes, run /mcp reload and /mcp login ${target}.`,
+    oauth_pkce_unsupported: "Use an authorization server or app configuration that supports authorization-code login with S256 PKCE. This client cannot fall back to login without PKCE.",
+    oauth_scope_rejected: `Check oauthScopes against the service's allowed scopes and app permissions. Run /mcp reload after changes, then /mcp login ${target}.`,
+    oauth_grant_rejected: `Run /mcp login ${target} for a fresh authorization code. If it fails again, verify the registered client and exact callback URL shown by /mcp get ${target}.`,
+    oauth_redirect_rejected: `Register the exact callback URL shown by /mcp get ${target}, including its host, port, and /callback path. --no-browser uses the same callback URL and does not bypass redirect validation.`,
+    oauth_endpoint_insecure: "Use an authorization server with an HTTPS token endpoint. HTTP is only allowed for loopback endpoints; do not disable TLS verification.",
     oauth_issuer_changed: `Verify the server configuration before running /mcp logout ${target} and /mcp login ${target} to trust the new authorization server.`,
     callback_unavailable: `Free the configured callback port, change oauthCallbackPort, or run /mcp login ${target} --no-browser.`,
     busy: "Wait for the current MCP operation to finish, then retry.",
@@ -140,7 +158,22 @@ export function formatDiagnostic(value: Diagnostic): string {
   return `${value.server ? `${value.server}: ` : ""}[${value.code}] ${value.message} ${value.hint}`;
 }
 
-/** Classify typed SDK errors and allowlisted OS codes, never error-message text. */
+/** Exact SDK fallbacks for failures that have no typed error in SDK 2.0.0.
+ * Never echo messages or match fragments: arbitrary server text stays private.
+ */
+function sdkOAuthFallback(error: Error): DiagnosticCode | undefined {
+  if (error.constructor !== Error) return;
+  switch (error.message) {
+    case "Incompatible auth server: does not support dynamic client registration":
+      return "oauth_client_required";
+    case "Incompatible auth server: does not support code challenge method S256":
+      return "oauth_pkce_unsupported";
+    case "client_secret_basic authentication requires a client_secret":
+      return "oauth_client_rejected";
+  }
+}
+
+/** Classify SDK errors and allowlisted codes without exposing raw payloads. */
 export function diagnose(error: unknown, context: DiagnosticContext): Diagnostic {
   if (context.signal?.aborted)
     return diagnostic(
@@ -182,8 +215,33 @@ export function diagnose(error: unknown, context: DiagnosticContext): Diagnostic
       if (["NOT_CONNECTED", "CONNECTION_CLOSED", "SEND_FAILED"].includes(current.code))
         return diagnostic("connection_failed", context);
     }
-    if (current instanceof OAuthClientFlowError || current instanceof OAuthError)
+    if (current instanceof RegistrationRejectedError)
+      return diagnostic("oauth_registration_rejected", context);
+    if (current instanceof InsecureTokenEndpointError)
+      return diagnostic("oauth_endpoint_insecure", context);
+    if (current instanceof OAuthError) {
+      switch (current.code) {
+        case "invalid_client":
+        case "unauthorized_client":
+          return diagnostic("oauth_client_rejected", context);
+        case "invalid_scope":
+        case "insufficient_scope":
+          return diagnostic("oauth_scope_rejected", context);
+        case "invalid_grant":
+          return diagnostic("oauth_grant_rejected", context);
+        case "invalid_redirect_uri":
+          return diagnostic("oauth_redirect_rejected", context);
+        case "access_denied":
+          return diagnostic("permission_denied", context);
+      }
       return diagnostic("oauth_failed", context);
+    }
+    if (current instanceof OAuthClientFlowError)
+      return diagnostic("oauth_failed", context);
+    if (context.operation === "auth" || context.oauth) {
+      const code = sdkOAuthFallback(current);
+      if (code) return diagnostic(code, context);
+    }
     if (current instanceof ProtocolError) return diagnostic(
       context.operation === "read" && (current instanceof ResourceNotFoundError || current.code === ProtocolErrorCode.ResourceNotFound) ? "resource_not_found" : "protocol_error", context,
     );

@@ -125,7 +125,7 @@ for (const rejectClient of [false, true]) {
     };
     try {
       if (rejectClient) {
-        await expect(authenticate(url, open, AbortSignal.timeout(10_000), store, "registered-client")).rejects.toThrow("oauth_failed");
+        await expect(authenticate(url, open, AbortSignal.timeout(10_000), store, "registered-client")).rejects.toThrow("oauth_client_rejected");
         expect(store.read()).not.toContain("private-error");
         expect(new OAuthProvider(url, store, undefined, "registered-client").tokens()).toBeUndefined();
       } else {

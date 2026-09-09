@@ -12,9 +12,13 @@ For externally managed bearer tokens, use
 Add the HTTP server, then log in:
 
 ```text
-/mcp add --scope global slack https://mcp.slack.com/mcp
-/mcp login slack
+/mcp add --scope global example https://mcp.example.com/mcp
+/mcp login example
 ```
+
+Replace the example URL with your server's URL. This flow requires dynamic
+client registration or a [pre-registered public client](#use-a-pre-registered-client).
+Adding a URL alone isn't enough for servers such as Slack.
 
 Login uses the effective server definition (the trusted project override, if
 present; otherwise the global definition) and starts the SDK's OAuth discovery
@@ -90,6 +94,35 @@ Log out before changing or removing the ID if you want to delete its old
 credentials. After the first successful grant, a pre-registered client is pinned
 to its authorization-server issuer. If that issuer changes, verify the server
 configuration before logging out and logging in again to trust the replacement.
+
+### Slack setup requirements
+
+[Slack doesn't support dynamic client registration](https://docs.slack.dev/ai/slack-mcp-server/).
+Without a registered client, login fails before opening a browser. Configure
+`oauthClientId` with your Slack app's client ID, and ensure the app supports
+public-client PKCE. Apps requiring a client secret aren't supported by this
+extension. Slack also requires an eligible internal or Marketplace-published
+app and any workspace administrator approval required by your workspace.
+
+Register the exact callback URL shown by `/mcp get slack` in the app settings
+(default: `http://127.0.0.1:19847/callback`). For example:
+
+```json
+{
+  "mcpServers": {
+    "slack": {
+      "url": "https://mcp.slack.com/mcp",
+      "oauthClientId": "${SLACK_OAUTH_CLIENT_ID}"
+    }
+  }
+}
+```
+
+Set the environment variable before starting Pi. Run `/mcp reload`, then
+`/mcp login slack`. A configured ID appears as **OAuth (pre-registered public
+client)** in `/mcp get slack`; the ID itself stays hidden. A client ID alone
+doesn't guarantee that the app permits this login flow or callback address.
+`--no-browser` doesn't fix registration or app-approval problems.
 
 ## Set scopes and callback ports
 
