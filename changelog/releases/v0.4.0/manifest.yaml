@@ -1,0 +1,9 @@
+created: 2026-09-09
+title: Expanded MCP resource and OAuth support
+intro: "This release expands Pi\u2019s MCP integration with on-demand resource discovery,\
+  \ parameterized reads, completions, and explicit subscriptions, alongside a more\
+  \ capable OAuth login flow. It also adds scoped server management and consistent\
+  \ MCP command and status conventions."
+source:
+  mode: sync-stable-queue
+  previous_stable: v0.3.3
