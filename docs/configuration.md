@@ -4,7 +4,9 @@
 
 You configure which servers the assistant can access. Add connections to
 `~/.pi/agent/mcp.json`, or `.mcp.json` in a trusted project. For command-based
-setup, see [Add and remove servers](commands.md#add-and-remove-servers).
+setup, see [Add and remove servers](commands.md#add-and-remove-servers). To reuse
+an existing Claude/Cursor-style JSON file, see
+[Import server definitions](commands.md#import-server-definitions).
 
 ## Files and transports
 
@@ -12,7 +14,9 @@ The files use the common Claude/Cursor-style `mcpServers` format, not a universa
 MCP configuration standard. VS Code's `servers` format and Codex's TOML format
 aren't supported. `PI_CODING_AGENT_DIR` overrides the global Pi directory.
 Project definitions replace same-named global definitions in full; fields and
-filters aren't merged. Untrusted project files are neither read nor changed.
+filters aren't merged. Untrusted project definitions aren't loaded or edited.
+An explicitly named import source is read as data for review; saving into project
+scope still requires project trust.
 
 ```json
 {
@@ -130,7 +134,9 @@ existing definitions. See [authentication](authentication.md).
 
 Every definition must include a `url` or `command`, even when `disabled` is true.
 These options are specific to Pi MCP Client, not standardized MCP connection
-fields. Other clients may reject them when you copy a definition.
+fields. Other clients may reject them when you copy a definition. The import command
+accepts only its documented subset of server fields and refuses unsupported
+entries rather than dropping options.
 
 Tool filters don't restrict resource reads. See
 [trust and permissions](behavior.md#trust-and-permissions) for access boundaries

@@ -110,7 +110,7 @@ export function parseConfigCommand(input: string): Extract<ConfigMutation, { act
 
 /** Complete only command syntax and server names; never connection values. */
 export function configCommandCompletions(input: string, servers: string[]) {
-  const match = /^(add|remove)\s+(.*)$/su.exec(input.trimStart());
+  const match = /^(add|remove|import)\s+(.*)$/su.exec(input.trimStart());
   if (!match) return undefined;
   const [, action, rest] = match;
   const choices = ["--scope global", "--scope project"];
@@ -122,7 +122,7 @@ export function configCommandCompletions(input: string, servers: string[]) {
   const args = /^--scope\s+(global|project)\s+([^\s]*)$/u.exec(rest);
   if (!args) return [];
   const [, scope, partial] = args;
-  const values = action === "remove" ? servers.sort() : ["--replace", "--transport", "--header", "--env", "--oauth-client-id", "--oauth-scope", "--oauth-callback-port"];
+  const values = action === "import" ? [] : action === "remove" ? servers.sort() : ["--replace", "--transport", "--header", "--env", "--oauth-client-id", "--oauth-scope", "--oauth-callback-port"];
   return values.filter((value) => value.startsWith(partial)).map((value) => ({
     value: `${action} --scope ${scope} ${value}`, label: value,
   }));

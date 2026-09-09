@@ -62,9 +62,11 @@ and [Claude Code MCP](https://code.claude.com/docs/en/mcp).
 - [x] **Server inspection and reload:** Inspect servers, browse tools, and reload
   configuration without restarting Pi; close connections and reconcile loaded tools.
 - [x] **Server enable/disable commands:** Toggle servers without editing configuration.
-- [ ] **Configuration imports:** Offer explicit, previewable imports from Claude,
-  Cursor, VS Code, Codex, and MCPorter. Never silently merge credentials or execute
-  imported commands.
+- [x] **JSON configuration imports:** Preview and select servers from explicitly
+  named Claude/Cursor-style JSON files, with scoped atomic writes and explicit
+  conflict resolution. Never silently merge credentials or execute commands.
+- [ ] **Additional import formats:** Add adapters for VS Code, Codex, and MCPorter
+  while preserving the preview, validation, and credential boundaries.
 - [ ] **Cache controls:** Inspect and clear catalogs, configure freshness, and show
   whether discovery used a cached or live catalog.
 - [ ] **Permission controls:** Offer per-server/tool confirmation policies or a

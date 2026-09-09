@@ -688,7 +688,7 @@ test("command completion suggests actions first and servers only after an action
   } }));
   const complete = h.commands.get("mcp").getArgumentCompletions;
   expect(complete("")).toEqual(
-    ["list", "status", "reload", "subscriptions", "add", "remove", "enable", "disable", "get", "tools", "prompts", "prompt", "login", "logout", "reconnect", "refresh", "subscribe", "unsubscribe"]
+    ["list", "status", "reload", "subscriptions", "add", "remove", "import", "enable", "disable", "get", "tools", "prompts", "prompt", "login", "logout", "reconnect", "refresh", "subscribe", "unsubscribe"]
       .map((value) => ({ value, label: value })),
   );
   expect(complete("to")).toEqual([{ value: "tools", label: "tools" }]);

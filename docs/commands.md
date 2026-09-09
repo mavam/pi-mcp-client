@@ -13,6 +13,7 @@ separate interface is documented in the [tool reference](tool-reference.md).
 | `/mcp`, `/mcp list`, `/mcp status` | Show a server status matrix with catalog and loaded-tool counts. |
 | `/mcp add --scope <scope> [options] <server> <url>` | Save an HTTP server without connecting. For stdio, use `<server> -- <command> [args...]`. |
 | `/mcp remove --scope <scope> <server>` | Remove a definition from the selected scope, retaining credentials. |
+| `/mcp import --scope <scope> <path>` | Preview and select servers from a Claude/Cursor-style JSON file, then confirm a scoped import. |
 | `/mcp get <server>` | Inspect status and configuration, including disabled servers. Connection values are hidden. |
 | `/mcp tools <server>` | Browse the server's tools and inspect descriptions without activating tools. |
 | `/mcp prompts <server>` | Browse prompt metadata, then select a prompt and enter arguments. |
@@ -177,6 +178,60 @@ preserve unrelated settings, follow existing file symlinks, and replace files
 atomically. New files are private; existing file permissions are preserved. If
 global and project configuration point to the same file, scoped edits are refused
 until you separate them. Empty configuration files are retained rather than deleted.
+
+## Import server definitions
+
+Import from an explicitly named local JSON file:
+
+```text
+/mcp import --scope project "/path with spaces/mcp.json"
+```
+
+The command requires an interactive TUI or RPC session and an explicit
+`--scope global` or `--scope project`. Project scope requires a trusted project.
+Relative source paths resolve against Pi's current directory; `~/` is supported.
+The path isn't evaluated by a shell, and no application settings are scanned.
+
+1. If the source contains other top-level settings, confirm that only
+   `mcpServers` should be considered. Nested project settings aren't traversed.
+2. Review each server's name, transport, enabled state, and any validation or
+   unsupported-field problems. Commands, arguments, URLs, headers, and environment
+   values stay hidden. Review the original file before importing connections you
+   don't already trust. Unsupported entries can only be skipped; their fields
+   aren't silently dropped.
+3. Choose **Skip**, add the definition, or **Choose a different name**. Name
+   conflicts require an explicit replacement or override choice. A replacement
+   replaces the entire definition, including headers and environment variables;
+   credentials and other fields aren't merged. A global import shadowed by a
+   project definition is labeled as such and doesn't change the effective server.
+4. Review the selected destination names and actions, then confirm the import.
+   The confirmation warns that inline credentials are copied with the selected
+   definitions. Existing Pi OAuth credentials are retained, but no external
+   credential store is read or migrated.
+
+Nothing is saved until the final confirmation. Cancellation, a session or trust
+change, or a changed destination configuration prevents saving the preview. All
+selected definitions are validated and written together using one atomic file
+replacement, then applied through the normal configuration reconciliation.
+The source snapshot isn't reread after confirmation, and the source and
+destination cannot be the same file. No server starts, secret command runs,
+login opens, or tool activates during import. Enabled connections become
+available on demand afterward; imported disabled servers stay disabled.
+
+The initial format is a top-level `mcpServers` object in strict UTF-8 JSON, limited
+to 1 MiB and 100 servers. Supported server fields are `type`, `command`, `args`,
+`cwd`, `env`, `url`, `headers`, `disabled`, and `description`. Only stdio and
+Streamable HTTP are supported. JSON comments, trailing commas, SSE, nested Claude
+project settings, VS Code, Codex, and MCPorter formats aren't supported.
+
+`${VAR}` references are preserved and must resolve in Pi before import. Default
+expressions and client-specific variables such as `${env:TOKEN}` or
+`${workspaceFolder}` are refused rather than translated. In environment and
+header values, bare `$VAR` and leading `!` remain literal: the importer escapes
+them so they don't become Pi variable expansions or secret commands. Other
+connection values retain Pi's normal interpolation rules. Relative executable,
+argument, and working-directory paths retain Pi's path semantics, not the source
+application's or import file's directory; verify them before importing.
 
 ## Watch resource changes
 

@@ -12,6 +12,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { searchCapabilities, validResourceUri, validTemplateRead, validCompletion, type TemplateTarget } from "./resources.js";
 import { usesOAuth, loadConfig, updateServerConfig, ConfigMutationError, resolveServer, allowed, object, type Config, type ConfigMutation } from "./config.js";
 import { parseConfigCommand, configCommandCompletions } from "./config-commands.js";
+import { runImportCommand } from "./import-command.js";
 import { authenticationSummary, oauthSettings, inspectServer, inspectTool, serverMatrix, toolPickerLabel } from "./management.js";
 import {
   DEFAULT_SEARCH_LIMIT,
@@ -72,6 +73,7 @@ export default function mcpClient(
   let sessionGeneration = 0;
   let loginController: AbortController | undefined;
   let promptController: AbortController | undefined;
+  let importController: AbortController | undefined;
   pi.registerMessageRenderer("mcp-prompt", (message, { expanded, outputPad }, theme) => {
     const details = object(message.details) ? message.details : {};
     const count = Number(details.count ?? 0);
@@ -157,12 +159,12 @@ export default function mcpClient(
   };
 
   let configurationQueue: Promise<unknown> = Promise.resolve();
-  function reloadConfiguration(ctx: ExtensionContext, mutation?: ConfigMutation) {
+  function reloadConfiguration(ctx: ExtensionContext, mutation?: ConfigMutation, assertCurrent?: () => void) {
     const generation = sessionGeneration;
     const update = configurationQueue.then(() => {
       if (generation !== sessionGeneration)
         throw new CommandUsageError("The Pi session changed while waiting to update configuration.");
-      return applyConfiguration(ctx, mutation);
+      return applyConfiguration(ctx, mutation, assertCurrent);
     });
     configurationQueue = update.catch(() => {});
     return update;
@@ -171,10 +173,12 @@ export default function mcpClient(
   async function applyConfiguration(
     ctx: ExtensionContext,
     mutation?: ConfigMutation,
+    assertCurrent?: () => void,
   ) {
     // Validate before changing disk or replacing a working setup. Secrets stay lazy.
     const generation = sessionGeneration;
     const validate = (nextConfig: Config) => {
+      assertCurrent?.();
       ctx.signal?.throwIfAborted();
       if (generation !== sessionGeneration)
         throw new CommandUsageError("The Pi session changed during configuration reload.");
@@ -207,6 +211,7 @@ export default function mcpClient(
       }
     });
     promptController?.abort();
+    if (mutation?.action !== "import") importController?.abort();
     const old = runtime;
     config = nextConfig;
     configError = undefined;
@@ -220,6 +225,7 @@ export default function mcpClient(
   pi.on("session_start", async (_event, ctx) => {
     sessionGeneration++;
     promptController?.abort();
+    importController?.abort();
     await runtime?.close();
     runtime = undefined;
     config = {};
@@ -236,6 +242,7 @@ export default function mcpClient(
   });
   pi.on("session_tree", async (_event, ctx) => {
     promptController?.abort();
+    importController?.abort();
     await runtime?.clearResourceSubscriptions();
     restore(ctx);
   });
@@ -243,6 +250,7 @@ export default function mcpClient(
     sessionGeneration++;
     loginController?.abort();
     promptController?.abort();
+    importController?.abort();
     const old = runtime;
     runtime = undefined;
     await old?.close();
@@ -499,7 +507,7 @@ export default function mcpClient(
 
   pi.registerCommand("mcp", {
     description:
-      "Manage MCP servers: add|remove --scope global|project, list, status, reload, enable|disable|get|tools|prompts|login|logout|reconnect|refresh <server>; prompt <server> <name> [argument=value ...]; subscriptions; subscribe|unsubscribe <server> <uri>",
+      "Manage MCP servers: add|remove|import --scope global|project, list, status, reload, enable|disable|get|tools|prompts|login|logout|reconnect|refresh <server>; prompt <server> <name> [argument=value ...]; subscriptions; subscribe|unsubscribe <server> <uri>",
     getArgumentCompletions(prefix) {
       const serverActions = ["enable", "disable", "get", "tools", "prompts", "prompt", "login", "logout", "reconnect", "refresh", "subscribe", "unsubscribe"];
       const input = prefix.trimStart();
@@ -507,7 +515,7 @@ export default function mcpClient(
       if (configuration !== undefined) return configuration;
       const match = /^(\S+)\s+(.*)$/s.exec(input);
       if (!match) {
-        return ["list", "status", "reload", "subscriptions", "add", "remove", ...serverActions]
+        return ["list", "status", "reload", "subscriptions", "add", "remove", "import", ...serverActions]
           .filter((action) => action.startsWith(input))
           .map((action) => ({ value: action, label: action }));
       }
@@ -537,6 +545,25 @@ export default function mcpClient(
       try {
         if (generation !== sessionGeneration)
           throw new CommandUsageError("The Pi session changed while waiting for idle.");
+        if (action === "import") {
+          server = "";
+          if (importController) throw new ConfigMutationError("A configuration import is already open.");
+          const activeRuntime = runtime;
+          const controller = new AbortController();
+          importController = controller;
+          try {
+            await runImportCommand(args, ctx, agentDir,
+              AbortSignal.any([controller.signal, ...(ctx.signal ? [ctx.signal] : [])]),
+              () => {
+                if (sessionGeneration !== generation || runtime !== activeRuntime)
+                  throw new ConfigMutationError("The Pi session or configuration changed during the preview. Run /mcp import again.");
+              },
+              (mutation, guard) => reloadConfiguration(ctx, mutation, guard));
+          } finally {
+            if (importController === controller) importController = undefined;
+          }
+          return;
+        }
         if (action === "prompt" || action === "prompts") {
           if (promptController) throw new PromptCommandError("A prompt selection is already open.");
           const activeRuntime = current();
@@ -682,7 +709,7 @@ export default function mcpClient(
           config[server].disabled
         )
           throw new CommandUsageError(
-            "Usage: /mcp list|status|reload, /mcp enable|disable|get|tools|login|logout|reconnect|refresh <server>, or /mcp add|remove --scope global|project ... . Disabled servers accept enable, disable, get, logout, and scoped removal.",
+            "Usage: /mcp list|status|reload, /mcp enable|disable|get|tools|login|logout|reconnect|refresh <server>, or /mcp add|remove|import --scope global|project ... . Disabled servers accept enable, disable, get, logout, and scoped removal.",
           );
         if (action === "tools") {
           if (!ctx.hasUI)
@@ -792,7 +819,7 @@ export default function mcpClient(
         }
         else
           throw new CommandUsageError(
-            "Unknown MCP command. Use /mcp list|status|reload or /mcp enable|disable|get|tools|login|logout|reconnect|refresh <server>, or /mcp add|remove --scope global|project ... .",
+            "Unknown MCP command. Use /mcp list|status|reload or /mcp enable|disable|get|tools|login|logout|reconnect|refresh <server>, or /mcp add|remove|import --scope global|project ... .",
           );
         if (ctx.hasUI)
           ctx.ui.notify(
@@ -807,7 +834,7 @@ export default function mcpClient(
                 diagnose(error, {
                   server,
                   operation:
-                    ["reload", "get", "enable", "disable", "add", "remove"].includes(action)
+                    ["reload", "get", "enable", "disable", "add", "remove", "import"].includes(action)
                       ? "configuration"
                       : ["tools", "prompts"].includes(action)
                         ? "search"
