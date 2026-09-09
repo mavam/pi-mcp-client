@@ -5,6 +5,7 @@ import { commandWords } from "./config-commands.js";
 import { failure } from "./diagnostics.js";
 import { preparePromptSnapshot, validPromptArguments, type CatalogPrompt, type PromptSnapshot } from "./prompts.js";
 import type { McpRuntime } from "./runtime.js";
+import { promptSelector } from "./prompt-selector.js";
 
 export class PromptCommandError extends Error {}
 export const PROMPT_USAGE = "Use /mcp prompts <server> or /mcp prompt <server> <name> [argument=value ...].";
@@ -33,7 +34,21 @@ export async function runPromptCommand(
   const guard = () => { signal.throwIfAborted(); assertCurrent(); };
   const select = async (title: string, choices: string[]) => {
     guard();
-    const selected = await ctx.ui.select(title, choices, { signal });
+    const selected = ctx.mode !== "tui"
+      ? await ctx.ui.select(title, choices, { signal })
+      : await ctx.ui.custom<string | undefined>((tui, theme, keys, done) => {
+        let settled = false;
+        const finish = (choice: string | undefined) => {
+          if (settled) return;
+          settled = true;
+          signal.removeEventListener("abort", abort);
+          done(choice);
+        };
+        const abort = () => finish(undefined);
+        signal.addEventListener("abort", abort, { once: true });
+        const selector = promptSelector(title, choices, theme, keys, finish, () => tui.requestRender());
+        return { ...selector, dispose: () => signal.removeEventListener("abort", abort) };
+      });
     guard();
     return selected;
   };
