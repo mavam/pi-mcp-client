@@ -137,6 +137,9 @@ test("descriptors and command quoting preserve exact identifiers without shell e
   expect(parsePromptCommand('prompt docs explain topic="OAuth flows" audience="$(touch nope)"').args)
     .toEqual({ topic: "OAuth flows", audience: "$(touch nope)" });
   expect(() => parsePromptCommand("prompt docs explain topic=x topic=y")).toThrow();
+  expect(parsePromptCommand("prompt docs")).toEqual({ server: "docs", name: undefined, args: {} });
+  expect(() => parsePromptCommand("prompt")).toThrow();
+  expect(() => parsePromptCommand("prompts docs")).toThrow();
   expect(() => parsePromptCommand("prompts docs extra")).toThrow();
   expect(validPromptArguments(prompt, { topic: "" })).toBe(true);
   expect(validPromptArguments(prompt, {})).toBe(false);
@@ -189,7 +192,8 @@ function commandHost(choices: (string | undefined | ((options: string[]) => stri
 
 test("browse and argument cancellation never fetch or attach content", async () => {
   const browse = commandHost([undefined]);
-  await browse.run("prompts docs");
+  await browse.run("prompt docs");
+  expect(browse.titles[0]).toContain("Prompts (metadata only");
   expect(browse.gets()).toBe(0);
   expect(browse.used).toEqual([]);
   const args = commandHost(["Cancel"]);

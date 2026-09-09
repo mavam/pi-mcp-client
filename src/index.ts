@@ -507,9 +507,9 @@ export default function mcpClient(
 
   pi.registerCommand("mcp", {
     description:
-      "Manage MCP servers: add|remove|import --scope global|project, list, status, reload, enable|disable|get|tools|prompts|login|logout|reconnect|refresh <server>; prompt <server> <name> [argument=value ...]; subscriptions; subscribe|unsubscribe <server> <uri>",
+      "Manage MCP servers: add|remove|import --scope global|project, list, status, reload, enable|disable|get|tools|login|logout|reconnect|refresh <server>; prompt <server> [name] [argument=value ...]; subscriptions; subscribe|unsubscribe <server> <uri>",
     getArgumentCompletions(prefix) {
-      const serverActions = ["enable", "disable", "get", "tools", "prompts", "prompt", "login", "logout", "reconnect", "refresh", "subscribe", "unsubscribe"];
+      const serverActions = ["enable", "disable", "get", "tools", "prompt", "login", "logout", "reconnect", "refresh", "subscribe", "unsubscribe"];
       const input = prefix.trimStart();
       const configuration = configCommandCompletions(input, Object.keys(config));
       if (configuration !== undefined) return configuration;
@@ -564,7 +564,7 @@ export default function mcpClient(
           }
           return;
         }
-        if (action === "prompt" || action === "prompts") {
+        if (action === "prompt") {
           if (promptController) throw new PromptCommandError("A prompt selection is already open.");
           const activeRuntime = current();
           const controller = new AbortController();
@@ -836,7 +836,7 @@ export default function mcpClient(
                   operation:
                     ["reload", "get", "enable", "disable", "add", "remove", "import"].includes(action)
                       ? "configuration"
-                      : ["tools", "prompts"].includes(action)
+                      : action === "tools"
                         ? "search"
                         : action === "prompt" ? "prompt"
                         : ["login", "logout"].includes(action)

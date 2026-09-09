@@ -16,8 +16,7 @@ separate interface is documented in the [tool reference](tool-reference.md).
 | `/mcp import --scope <scope> <path>` | Preview and select servers from Claude/Cursor JSON or Codex TOML, then confirm a scoped import. |
 | `/mcp get <server>` | Inspect status and configuration, including disabled servers. Connection values are hidden. |
 | `/mcp tools <server>` | Browse the server's tools and inspect descriptions without activating tools. |
-| `/mcp prompts <server>` | Browse prompt metadata, then select a prompt and enter arguments. |
-| `/mcp prompt <server> <name> [argument=value ...]` | Open a named prompt with prefilled arguments, then fetch and review a preview. |
+| `/mcp prompt <server> [name] [argument=value ...]` | Browse prompts or open a named prompt with prefilled arguments, then fetch and review a preview. |
 | `/mcp reload` | Apply configuration changes without restarting Pi. |
 | `/mcp enable <server>` | Enable a server in its effective configuration file. |
 | `/mcp disable <server>` | Disable a server, close its connection, and deactivate its tools. |
@@ -68,7 +67,7 @@ Prompts are server-maintained task instructions that **you** choose to use. For 
 server that provides an `explain` prompt, browse or open it directly:
 
 ```text
-/mcp prompts docs
+/mcp prompt docs
 /mcp prompt docs explain topic="OAuth flows"
 ```
 
