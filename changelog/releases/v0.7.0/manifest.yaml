@@ -1,0 +1,9 @@
+created: 2026-09-09
+title: One prompt command
+intro: >-
+  Browse and open MCP prompts with one command: use /mcp prompt with a server name
+  to browse, or add a prompt name to open it directly. This release removes the separate
+  /mcp prompts command.
+source:
+  mode: sync-stable-queue
+  previous_stable: v0.6.0
