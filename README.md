@@ -228,6 +228,7 @@ Put descriptions, authentication choices, filters, and timeouts directly in each
 | --- | --- |
 | `description` | Short capability description for Pi's server directory. |
 | `oauth` | Set to `true` to use OAuth instead of an Authorization header on an HTTP connection. |
+| `oauthClientId` | Optional pre-registered public client ID. Requires `oauth: true`; supports `${ENV_VAR}` interpolation, not secret commands. |
 | `disabled` | Prevent this server from connecting or exposing tools. |
 | `includeTools` | Optional allowlist of original MCP tool names; `*` matches any sequence. An empty list exposes nothing. |
 | `excludeTools` | Denylist applied after `includeTools`. |
@@ -305,13 +306,14 @@ Authorization header in its connection, then run `/mcp login <server>`. Pi opens
 browser only for this explicit command. Automatic discovery never opens a browser.
 
 OAuth tokens and client registrations are stored in the operating system
-credential store, bound to the server URL and authorization-server issuer.
+credential store, bound to the server URL, configured client ID (if any), and
+authorization-server issuer.
 There is no plaintext credential fallback. PKCE verifiers and callback state stay
 in memory.
 
 Run `/mcp logout <server>` to remove stored tokens and client registrations. Logout
 also closes connections and deactivates tools for configured OAuth servers sharing
-the same URL, since they share credentials. Configuration and enabled state stay
+the same URL and configured client ID, since they share credentials. Configuration and enabled state stay
 unchanged. Disabled servers accept logout too. Header and server-managed credentials
 remain untouched.
 
@@ -322,12 +324,41 @@ grant at the service if needed. Repeating logout is safe. Other running Pi sessi
 may need to reconnect; logout cannot recall requests already sent to a server.
 No browser opens until you explicitly run `/mcp login <server>`.
 
-The initial implementation supports dynamically registered public clients with a
-local callback at `http://127.0.0.1:19847/callback`. The browser must be able to
-reach that address on the Pi machine. Authentication times out after two minutes;
-you can cancel it with Escape in the terminal UI.
-Pre-registered OAuth clients, remote callback pasting, and headless interactive
-OAuth are not supported yet. Use bearer headers for headless access.
+Public clients can use dynamic registration or a pre-registered client ID. Both
+use PKCE and a local callback at `http://127.0.0.1:19847/callback`. The browser must
+be able to reach that address on the Pi machine. Authentication times out after
+two minutes; you can cancel it with Escape in the terminal UI. Explicit login
+always opens the authorization flow, even if a refresh token is already stored.
+
+For a server without dynamic registration, register a **public/native** client
+with the service, using that exact callback URL and token endpoint authentication
+method `none`. Then configure its client ID:
+
+```json
+{
+  "mcpServers": {
+    "example": {
+      "url": "https://mcp.example.com/mcp",
+      "oauth": true,
+      "oauthClientId": "${EXAMPLE_OAUTH_CLIENT_ID}"
+    }
+  }
+}
+```
+
+Run `/mcp reload`, then `/mcp login example`. The configured ID is used for login,
+token refresh, and revocation; Pi never falls back to dynamic registration if it
+is rejected. `/mcp get example` identifies the client as pre-registered without
+printing the ID.
+
+Changing the client ID selects separate credentials and requires a new login.
+Log out before changing or removing the ID if you want to delete its old
+credentials. After the first successful grant, a pre-registered client is pinned
+to its authorization-server issuer. If that issuer changes, verify the server
+configuration before logging out and logging in again to trust the replacement.
+
+Client secrets, custom callback ports, remote callback pasting, and headless
+interactive OAuth are not supported yet. Use bearer headers for headless access.
 
 ### Trust and permissions
 
@@ -380,7 +411,8 @@ unavailable server is not an empty catalog.
 | `protocol_error` | Server compatibility and the `protocol` setting. |
 | `tool_changed` | Server filters and the current tool schema; activate the exact identifier again. Reload Pi if connection configuration changed. |
 | `tool_error` | The server's tool result and inputs; verify the outcome before retrying. |
-| `oauth_failed` | Browser access to the callback and support for dynamically registered public clients. |
+| `oauth_failed` | Browser access to the callback and support for public clients, using dynamic registration or the configured client ID. |
+| `oauth_issuer_changed` | Verify the authorization-server change before logging out and logging in again. |
 | `callback_unavailable` | Another process using local port 19847. |
 | `busy` | Wait for discovery to finish before reconnecting. |
 | `cancelled` | Retry when ready; verify any interrupted tool operation first. |

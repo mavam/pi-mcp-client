@@ -22,6 +22,7 @@ const messages = {
   tool_changed: "The tool is unavailable or its configuration or schema changed.",
   tool_error: "The tool reported an error.",
   oauth_failed: "OAuth authentication did not complete.",
+  oauth_issuer_changed: "The OAuth authorization server changed.",
   callback_unavailable: "The local OAuth callback port is unavailable.",
   busy: "Discovery is still running.",
   operation_failed: "The operation failed.",
@@ -85,7 +86,8 @@ export function diagnostic(
       "Check server filters and use mcp_tools with activate and the exact identifier to activate the current tool definition. Reload Pi if the connection configuration changed.",
     tool_error:
       "Review the server's tool result and inputs. Verify the outcome before retrying.",
-    oauth_failed: `Check OAuth support and browser access to the local callback, then run /mcp login ${target}.`,
+    oauth_failed: `Check OAuth support, the configured public client ID, and browser access to the local callback, then run /mcp login ${target}.`,
+    oauth_issuer_changed: `Verify the server configuration before running /mcp logout ${target} and /mcp login ${target} to trust the new authorization server.`,
     callback_unavailable: "Free local port 19847, then retry authentication.",
     busy: "Wait for discovery to finish, then retry.",
     operation_failed:

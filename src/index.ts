@@ -7,7 +7,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { loadConfig, setServerDisabled, resolveServer, allowed, object, type Config } from "./config.js";
-import { authenticationSummary, oauthUrl, inspectServer, inspectTool, serverMatrix, toolPickerLabel } from "./management.js";
+import { authenticationSummary, oauthSettings, inspectServer, inspectTool, serverMatrix, toolPickerLabel } from "./management.js";
 import {
   DEFAULT_SEARCH_LIMIT,
   MAX_SEARCH_LIMIT,
@@ -452,14 +452,17 @@ export default function mcpClient(
             );
             return;
           }
-          const url = oauthUrl(config[server], ctx.cwd);
-          const store = await storeFactory(url);
+          const { url, clientId } = oauthSettings(config[server], ctx.cwd);
+          const store = await storeFactory(url, clientId);
           if (generation !== sessionGeneration)
             throw new CommandUsageError("The Pi session changed during logout.");
-          // Definitions sharing this URL also share the OS credential record.
+          // Only definitions sharing both URL and client ID share credentials.
           const related = Object.keys(config).filter((name) => {
-            try { return config[name].oauth && oauthUrl(config[name], ctx.cwd) === url; }
-            catch { return false; }
+            if (!config[name].oauth) return false;
+            try {
+              const other = oauthSettings(config[name], ctx.cwd);
+              return other.url === url && other.clientId === clientId;
+            } catch { return false; }
           });
           await current().disconnect(related);
           if (generation !== sessionGeneration)
@@ -467,7 +470,7 @@ export default function mcpClient(
           pi.setActiveTools(pi.getActiveTools().filter((name) =>
             !related.includes(exposure.definitions.get(name)?.server ?? ""),
           ));
-          const revocation = await logout(url, store, ctx.signal);
+          const revocation = await logout(url, store, ctx.signal, clientId);
           const detail = {
             confirmed: "The authorization server accepted token revocation.",
             unsupported: "The authorization server does not advertise token revocation; remote access may remain valid.",
@@ -535,8 +538,7 @@ export default function mcpClient(
             throw new CommandUsageError(
               "Enable oauth in this HTTP server's mcpServers definition in mcp.json first.",
             );
-          const { resolveServer } = await import("./config.js");
-          const url = resolveServer(config[server], ctx.cwd).url!;
+          const { url, clientId } = oauthSettings(config[server], ctx.cwd);
           const open = async (target: string) => {
             ctx.ui.notify(`Authenticate ${server} in your browser:\n${target}`, "info");
             const command =
@@ -547,7 +549,7 @@ export default function mcpClient(
                   : "xdg-open";
             await pi.exec(command, [target], { timeout: 5000 }).catch(() => {});
           };
-          const store = await storeFactory(url);
+          const store = await storeFactory(url, clientId);
           if (ctx.mode === "tui") {
             let authError: unknown;
             const ok = await ctx.ui.custom<boolean>((tui, theme, _keys, done) => {
@@ -556,7 +558,7 @@ export default function mcpClient(
                 theme,
                 `Waiting for ${server} authentication…`,
               );
-              void authenticate(url, open, loader.signal, store).then(
+              void authenticate(url, open, loader.signal, store, clientId).then(
                 () => {
                   loader.dispose();
                   done(true);
@@ -571,7 +573,7 @@ export default function mcpClient(
             });
             if (!ok)
               throw authError ?? failure("cancelled", { server, operation: "auth" });
-          } else await authenticate(url, open, ctx.signal, store);
+          } else await authenticate(url, open, ctx.signal, store, clientId);
           await current().reconnect(server);
         } else if (action === "reconnect") await current().reconnect(server);
         else if (action === "refresh") await current().catalog(server, ctx.signal, true);

@@ -102,8 +102,9 @@ export function inspectTool(tool: CatalogTool): string {
 }
 
 /** Resolve only the credential identity, never headers or secret commands. */
-export function oauthUrl(config: ServerConfig, cwd: string): string {
-  return resolveServer({ url: config.url, oauth: true }, cwd).url!;
+export function oauthSettings(config: ServerConfig, cwd: string): { url: string; clientId?: string } {
+  const resolved = resolveServer({ url: config.url, oauth: true, oauthClientId: config.oauthClientId }, cwd);
+  return { url: resolved.url!, clientId: resolved.oauthClientId };
 }
 
 export async function authenticationSummary(
@@ -116,14 +117,15 @@ export async function authenticationSummary(
     : Object.keys(config.headers ?? {}).length
       ? "Headers (externally managed)"
       : "None configured";
+  const method = config.oauthClientId === undefined ? "OAuth" : "OAuth (pre-registered public client)";
   try {
-    const url = oauthUrl(config, cwd);
-    const provider = new OAuthProvider(url, await storeFactory(url));
+    const { url, clientId } = oauthSettings(config, cwd);
+    const provider = new OAuthProvider(url, await storeFactory(url, clientId), undefined, clientId);
     return provider.tokens()
-      ? "OAuth · stored tokens (validity not checked)"
-      : "OAuth · no stored tokens";
+      ? `${method} · stored tokens (validity not checked)`
+      : `${method} · no stored tokens`;
   } catch {
-    return "OAuth · credential status unavailable";
+    return `${method} · credential status unavailable`;
   }
 }
 
