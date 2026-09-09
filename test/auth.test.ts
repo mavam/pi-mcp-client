@@ -57,7 +57,7 @@ test("SDK OAuth round trip validates callback state and stores tokens", async ()
   base = `http://127.0.0.1:${server.port}`;
   try {
     await authenticate(
-      `${base}/mcp`,
+      { server: "example", url: `${base}/mcp` },
       async (target) => {
         const authorization = new URL(target);
         expect(authorization.searchParams.get("code_challenge_method")).toBe("S256");

@@ -1,6 +1,6 @@
 import { line, plain, type CatalogTool } from "./catalog.js";
 import { object, resolveServer, usesOAuth, type ServerConfig } from "./config.js";
-import { credentialStore, OAuthProvider, type CredentialStoreFactory } from "./auth.js";
+import { credentialStore, OAuthProvider, type CredentialStoreFactory, type OAuthIdentity } from "./auth.js";
 import type { ServerStatus } from "./runtime.js";
 import { truncateToWidth } from "@earendil-works/pi-tui";
 
@@ -102,12 +102,13 @@ export function inspectTool(tool: CatalogTool): string {
 }
 
 /** Resolve only the credential identity, never headers or secret commands. */
-export function oauthSettings(config: ServerConfig, cwd: string): { url: string; clientId?: string } {
+export function oauthSettings(server: string, config: ServerConfig, cwd: string): OAuthIdentity {
   const resolved = resolveServer({ url: config.url, oauthClientId: config.oauthClientId }, cwd);
-  return { url: resolved.url!, clientId: resolved.oauthClientId };
+  return { server, url: resolved.url!, clientId: resolved.oauthClientId };
 }
 
 export async function authenticationSummary(
+  server: string,
   config: ServerConfig,
   cwd: string,
   storeFactory: CredentialStoreFactory = credentialStore,
@@ -117,8 +118,8 @@ export async function authenticationSummary(
     : "Headers (externally managed)";
   const method = config.oauthClientId === undefined ? "OAuth" : "OAuth (pre-registered public client)";
   try {
-    const { url, clientId } = oauthSettings(config, cwd);
-    const provider = new OAuthProvider(url, await storeFactory(url, clientId), undefined, clientId);
+    const identity = oauthSettings(server, config, cwd);
+    const provider = new OAuthProvider(identity, await storeFactory(identity));
     return provider.tokens()
       ? `${method} · stored tokens (validity not checked)`
       : `${method} · no stored tokens`;

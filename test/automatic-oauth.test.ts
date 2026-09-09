@@ -18,7 +18,7 @@ test("OAuth inference honors Authorization headers", async () => {
   for (const config of [{ command: "server" },
     { url: "https://example.com", headers: { aUtHoRiZaTiOn: "Bearer private" } }]) {
     expect(usesOAuth(config)).toBe(false);
-    expect(await connectionAuthProvider(config, async () => { throw new Error("must not touch credentials"); })).toBeUndefined();
+    expect(await connectionAuthProvider("example", config, async () => { throw new Error("must not touch credentials"); })).toBeUndefined();
   }
   expect(usesOAuth({ url: "https://example.com" })).toBe(true);
   for (const oauth of [true, false])
@@ -33,7 +33,7 @@ test("OAuth inference honors Authorization headers", async () => {
 
 test("automatic credentials fail closed if a previously available store becomes locked", async () => {
   const store = memoryStore();
-  const provider = await connectionAuthProvider({ url: "https://example.com/mcp" }, async () => store);
+  const provider = await connectionAuthProvider("example", { url: "https://example.com/mcp" }, async () => store);
   expect(await provider!.tokens()).toBeUndefined();
   store.read = () => { throw failure("credential_store_unavailable", { operation: "auth" }); };
   await expect(provider!.tokens()).rejects.toThrow("credential_store_unavailable");
@@ -87,7 +87,7 @@ for (const protocol of ["auto", "legacy"] as const) for (const scenario of [
     cleanup.push(async () => { await server.stop(true); });
     const url = `${base}/mcp`;
     if (["stored-token", "refresh", "header"].includes(scenario)) {
-      const provider = new OAuthProvider(url, store);
+      const provider = new OAuthProvider({ server: "example", url }, store);
       provider.saveClientInformation({ client_id: "fixture-client", issuer: base }, { issuer: base });
       provider.saveTokens({ access_token: scenario === "refresh" ? "private-expired" : "private-valid", token_type: "Bearer", issuer: base,
         ...(scenario === "refresh" ? { refresh_token: "private-refresh" } : {}) });

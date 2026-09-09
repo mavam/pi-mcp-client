@@ -55,17 +55,53 @@ Client** and asks you to return to Pi; receiving a callback doesn't yet mean the
 token exchange succeeded.
 
 OAuth tokens and client registrations are stored in the operating system
-credential store, bound to the server URL, configured client ID (if any), and
-authorization-server issuer. There is no plaintext credential fallback. PKCE
+credential store, bound to the configured server name, URL, client ID (if any),
+and authorization-server issuer. There is no plaintext credential fallback. PKCE
 verifiers and callback state stay in memory. Linux requires a working Secret
 Service/keyring session.
 
 ### Upgrade from earlier versions
 
-Credentials now use an identity based only on the server URL and optional client
-ID. Earlier credential-store entries aren't migrated or deleted. Run
-`/mcp login <server>` again after upgrading; revoke old grants at the service if
-needed. Changing scopes or the callback port doesn't select a different store.
+Credentials now include the configured server name in their identity. Earlier
+entries keyed only by URL and client ID aren't migrated or deleted: assigning a
+shared grant to a name could select the wrong account. Run `/mcp login <server>`
+again for each named connection after upgrading. Revoke old grants at the service
+if needed; the new logout command doesn't remove those earlier keyring entries.
+Changing scopes or the callback port doesn't select a different store.
+
+## Use multiple accounts
+
+Each named server has its own OAuth login, even when multiple definitions use
+the same endpoint and client ID. No profile setting is required:
+
+```json
+{
+  "mcpServers": {
+    "cloudflare-personal": { "url": "https://mcp.cloudflare.com/mcp" },
+    "cloudflare-work": { "url": "https://mcp.cloudflare.com/mcp" }
+  }
+}
+```
+
+Log in to each connection separately:
+
+```text
+/mcp login cloudflare-personal
+/mcp login cloudflare-work
+```
+
+Choose the intended account in the browser for each login. Names are local
+labels, not verified account identities, and don't change browser cookies. Use
+`--no-browser` to open the authorization URL in a different browser profile if
+needed. Both connections can remain active; tool names identify their server.
+
+Definitions with the same name, URL, and client ID reuse credentials across
+projects. Global and trusted project definitions still resolve to one effective
+definition per name. Use different names when you need separate accounts.
+
+Renaming a server or changing its URL or client ID requires a new login. Log out
+before making these changes if you want to remove the old credentials. Removing
+a server definition alone doesn't delete its credentials.
 
 ## Use a pre-registered client
 
@@ -160,7 +196,7 @@ granted permissions or a per-tool permission policy.
 After changing these options, run `/mcp reload`, then `/mcp login example`.
 Changing configuration never starts authorization or revokes existing grants.
 Scopes and callback ports don't select separate credential stores: definitions
-sharing a URL and client ID still share credentials. Explicit login renews a
+sharing a name, URL, and client ID still share credentials. Explicit login renews a
 dynamic registration when its requested options change. `/mcp get example` shows
 the requested scopes and callback address without connecting.
 
@@ -192,17 +228,20 @@ clients requiring a client secret aren't supported yet.
 
 ## Sign out
 
-Run `/mcp logout <server>` to remove stored tokens and client registrations. Logout
-also closes connections and deactivates tools for OAuth servers sharing
-the same URL and configured client ID, since they share credentials. Configuration
-and enabled state stay unchanged. Disabled servers accept logout too. Header and
-server-managed credentials remain untouched.
+Run `/mcp logout <server>` to remove that named server's stored tokens and client
+registrations, close its connection, and deactivate its tools. Other named
+servers keep their local credentials, connections, and active tools, even when
+they use the same URL and client ID. Configuration and enabled state stay
+unchanged. Disabled servers accept logout too. Header and server-managed
+credentials remain untouched.
 
 Local removal happens before a bounded attempt to revoke tokens at the original
 authorization server. The result distinguishes accepted revocation, unsupported
 revocation, and unconfirmed revocation. When revocation isn't confirmed, remove the
 grant at the service if needed. Repeating logout is safe. Other running Pi sessions
-may need to reconnect; logout cannot recall requests already sent to a server.
+using the same named credentials may need to reconnect; logout cannot recall
+requests already sent to a server. Remote revocation behavior depends on the
+service and can affect related grants beyond this local connection.
 
 Removing a server definition doesn't remove its credentials. Log out before
 [removing the definition](commands.md#add-and-remove-servers) if you want both.

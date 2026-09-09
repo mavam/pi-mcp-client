@@ -591,7 +591,7 @@ export default function mcpClient(
           if (ctx.hasUI)
             ctx.ui.notify(
               inspectServer(server, config[server], current().status(server),
-                await authenticationSummary(config[server], ctx.cwd, storeFactory)),
+                await authenticationSummary(server, config[server], ctx.cwd, storeFactory)),
               "info",
             );
           return;
@@ -603,25 +603,17 @@ export default function mcpClient(
             );
             return;
           }
-          const { url, clientId } = oauthSettings(config[server], ctx.cwd);
-          const store = await storeFactory(url, clientId);
+          const identity = oauthSettings(server, config[server], ctx.cwd);
+          const store = await storeFactory(identity);
           if (generation !== sessionGeneration)
             throw new CommandUsageError("The Pi session changed during logout.");
-          // Only definitions sharing both URL and client ID share credentials.
-          const related = Object.keys(config).filter((name) => {
-            if (!usesOAuth(config[name])) return false;
-            try {
-              const other = oauthSettings(config[name], ctx.cwd);
-              return other.url === url && other.clientId === clientId;
-            } catch { return false; }
-          });
-          await current().disconnect(related);
+          await current().disconnect([server]);
           if (generation !== sessionGeneration)
             throw new CommandUsageError("The Pi session changed during logout.");
           pi.setActiveTools(pi.getActiveTools().filter((name) =>
-            !related.includes(exposure.definitions.get(name)?.server ?? ""),
+            exposure.definitions.get(name)?.server !== server,
           ));
-          const revocation = await logout(url, store, ctx.signal, clientId);
+          const revocation = await logout(identity, store, ctx.signal);
           const detail = {
             confirmed: "The authorization server accepted token revocation.",
             unsupported: "The authorization server does not advertise token revocation; remote access may remain valid.",
@@ -629,7 +621,7 @@ export default function mcpClient(
             "not-needed": "No stored tokens needed revocation.",
           }[revocation];
           if (ctx.hasUI) ctx.ui.notify(
-            `✔︎ ${server}: local OAuth credentials removed; related connections closed and tools deactivated. ${detail} Configuration is unchanged. Other running Pi sessions may need to reconnect.`,
+            `✔︎ ${server}: local OAuth credentials removed; this connection closed and its tools deactivated. ${detail} Configuration is unchanged. Other running Pi sessions may need to reconnect.`,
             revocation === "unconfirmed" || revocation === "unsupported" ? "warning" : "info",
           );
           return;
@@ -689,7 +681,7 @@ export default function mcpClient(
             throw new CommandUsageError("OAuth login requires an HTTP server; stdio authentication is managed by the server.");
           if (Object.keys(config[server].headers ?? {}).some((name) => name.toLowerCase() === "authorization"))
             throw new CommandUsageError("This server uses an Authorization header. Remove it from the server definition before using /mcp login, or keep using header authentication.");
-          const { url, clientId } = oauthSettings(config[server], ctx.cwd);
+          const identity = oauthSettings(server, config[server], ctx.cwd);
           const options = config[server];
           const loginRuntime = current();
           const open = async (target: string) => {
@@ -710,12 +702,12 @@ export default function mcpClient(
           const signal = AbortSignal.any([controller.signal, ...(ctx.signal ? [ctx.signal] : [])]);
           try {
             signal.throwIfAborted();
-            const store = await storeFactory(url, clientId);
+            const store = await storeFactory(identity);
             if (generation !== sessionGeneration || current() !== loginRuntime)
               throw failure("cancelled", { server, operation: "auth" });
             const summary = `Requested scopes: ${options.oauthScopes?.join(", ") ?? "SDK/server defaults"}\nCallback: http://127.0.0.1:${options.oauthCallbackPort ?? 19847}/callback`;
             if (extra[0] === "--no-browser") {
-              await authenticate(url, open, signal, store, clientId, {
+              await authenticate(identity, open, signal, store, {
                 ...options,
                 handoff: (target, deadline) => ctx.ui.input(
                   `Sign in to ${server}\n${summary}\n\nOpen this URL in a browser:\n${target}\n\nComplete sign-in, then paste the full callback URL from the address bar, even if the browser shows a connection error. Do not paste it into chat.`,
@@ -731,7 +723,7 @@ export default function mcpClient(
                   theme,
                   `Signing in to ${server}…\n${summary}\nOpening browser. Esc to cancel.`,
                 );
-                void authenticate(url, open, AbortSignal.any([signal, loader.signal]), store, clientId, options).then(
+                void authenticate(identity, open, AbortSignal.any([signal, loader.signal]), store, options).then(
                   () => {
                     loader.dispose();
                     done(true);
@@ -746,7 +738,7 @@ export default function mcpClient(
               });
               if (!ok)
                 throw authError ?? failure("cancelled", { server, operation: "auth" });
-            } else await authenticate(url, open, signal, store, clientId, options);
+            } else await authenticate(identity, open, signal, store, options);
             if (generation !== sessionGeneration || current() !== loginRuntime) throw failure("cancelled", { server, operation: "auth" });
             await loginRuntime.reconnect(server);
           } finally {

@@ -35,9 +35,12 @@ export function parseCallback(value: string, redirect: string, state: string): U
       !(params.get("code") || params.get("error"))) throw invalid();
   return params;
 }
-interface Credentials {
+export interface OAuthIdentity {
+  server: string;
   url: string;
   clientId?: string;
+}
+interface Credentials extends OAuthIdentity {
   clients: Record<string, StoredOAuthClientInformation>;
   registrations?: Record<string, { redirect: string; scope?: string }>;
   tokens?: StoredOAuthTokens;
@@ -47,16 +50,16 @@ export interface SecretStore {
   write(value: string): void;
   remove(): void;
 }
-export type CredentialStoreFactory = (url: string, clientId?: string) => Promise<SecretStore>;
+export type CredentialStoreFactory = (identity: OAuthIdentity) => Promise<SecretStore>;
 
-export function credentialKey(url: string, clientId?: string): string {
-  return fingerprint({ url, clientId });
+export function credentialKey({ server, url, clientId }: OAuthIdentity): string {
+  return fingerprint({ server, url, clientId });
 }
 
 // Invalidate even providers created before a login has saved its first record.
 const credentialEpochs = new Map<string, number>();
 
-export async function credentialStore(url: string, clientId?: string): Promise<SecretStore> {
+export async function credentialStore(identity: OAuthIdentity): Promise<SecretStore> {
   // Loaded only for OAuth servers. Fail closed if the OS store is unavailable.
   const protect = <T>(action: () => T): T => {
     try {
@@ -67,7 +70,7 @@ export async function credentialStore(url: string, clientId?: string): Promise<S
   };
   try {
     const { Entry } = await import("@napi-rs/keyring");
-    const entry = new Entry("pi-mcp-client", credentialKey(url, clientId));
+    const entry = new Entry("pi-mcp-client", credentialKey(identity));
     return {
       read: () => protect(() => entry.getPassword()),
       write: (value) => protect(() => entry.setPassword(value)),
@@ -100,16 +103,18 @@ export class OAuthProvider implements OAuthClientProvider {
   private verifier?: string;
   private discovery?: OAuthDiscoveryState;
   readonly expectedState = randomUUID();
+  private readonly clientId?: string;
   constructor(
-    readonly url: string,
+    identity: OAuthIdentity,
     private readonly store: SecretStore,
     private readonly redirect?: (url: URL) => void | Promise<void>,
-    private readonly clientId?: string,
     options: OAuthOptions = {},
   ) {
+    const { server, url, clientId } = identity;
+    this.clientId = clientId;
     this.redirectUrl = callbackUrl(options);
     this.clientMetadata = clientMetadata(options);
-    this.key = credentialKey(url, clientId);
+    this.key = credentialKey(identity);
     this.epoch = credentialEpochs.get(this.key) ?? 0;
     const raw = store.read();
     this.snapshot = raw;
@@ -117,6 +122,7 @@ export class OAuthProvider implements OAuthClientProvider {
       const data: unknown = JSON.parse(raw);
       if (
         !object(data) ||
+        data.server !== server ||
         data.url !== url ||
         data.clientId !== clientId ||
         !object(data.clients) ||
@@ -125,7 +131,7 @@ export class OAuthProvider implements OAuthClientProvider {
       )
         throw new Error("Invalid OAuth credential record.");
       this.data = data as unknown as Credentials;
-    } else this.data = { url, clientId, clients: {} };
+    } else this.data = { server, url, clientId, clients: {} };
   }
   private assertCurrent() {
     if ((credentialEpochs.get(this.key) ?? 0) !== this.epoch || this.store.read() !== this.snapshot)
@@ -237,14 +243,16 @@ export class OAuthProvider implements OAuthClientProvider {
  * authentication may reuse or refresh existing grants through the SDK.
  */
 export async function connectionAuthProvider(
+  server: string,
   config: ServerConfig,
   storeFactory: CredentialStoreFactory = credentialStore,
 ): Promise<OAuthClientProvider | undefined> {
   if (!usesOAuth(config)) return undefined;
+  const identity = { server, url: config.url!, clientId: config.oauthClientId };
   let initialized = false;
   const create = async () => {
     const provider = new OAuthProvider(
-      config.url!, await storeFactory(config.url!, config.oauthClientId), undefined, config.oauthClientId, config,
+      identity, await storeFactory(identity), undefined, config,
     );
     initialized = true;
     return provider;
@@ -285,16 +293,16 @@ export type Revocation = "confirmed" | "unsupported" | "unconfirmed" | "not-need
 
 /** Local removal is unconditional; revocation is bounded, issuer-bound, and best effort. */
 export async function logout(
-  url: string,
+  identity: OAuthIdentity,
   store: SecretStore,
   signal?: AbortSignal,
-  clientId?: string,
 ): Promise<Revocation> {
+  const { url } = identity;
   let tokens: StoredOAuthTokens | undefined;
   let client: StoredOAuthClientInformation | undefined;
   let readable = true;
   try {
-    const provider = new OAuthProvider(url, store, undefined, clientId);
+    const provider = new OAuthProvider(identity, store);
     tokens = provider.tokens();
     if (tokens?.issuer) client = provider.clientInformation({ issuer: tokens.issuer });
   } catch {
@@ -302,7 +310,7 @@ export async function logout(
     readable = false;
   }
   store.remove();
-  const key = credentialKey(url, clientId);
+  const key = credentialKey(identity);
   credentialEpochs.set(key, (credentialEpochs.get(key) ?? 0) + 1);
   if (!readable) return "unconfirmed";
   if (!tokens) return "not-needed";
@@ -357,15 +365,15 @@ function waitFor<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
 
 /** Explicit user action only; OAuth never opens a browser during search or execution. */
 export async function authenticate(
-  url: string,
+  identity: OAuthIdentity,
   open: (url: string) => Promise<void>,
   signal?: AbortSignal,
   store?: SecretStore,
-  clientId?: string,
   options: OAuthOptions & {
     handoff?: (authorizationUrl: string, signal: AbortSignal) => Promise<string | undefined>;
   } = {},
 ): Promise<void> {
+  const { url } = identity;
   const deadline = AbortSignal.any([
     AbortSignal.timeout(120_000),
     ...(signal ? [signal] : []),
@@ -375,8 +383,8 @@ export async function authenticate(
     resolveCallback = resolve;
   });
   const provider = new OAuthProvider(
-    url,
-    store ?? (await credentialStore(url, clientId)),
+    identity,
+    store ?? (await credentialStore(identity)),
     async (target) => {
       deadline.throwIfAborted();
       if (!options.handoff) return open(target.href);
@@ -385,7 +393,6 @@ export async function authenticate(
       if (value === undefined) throw failure("cancelled", { operation: "auth" });
       resolveCallback(parseCallback(value.trim(), provider.redirectUrl, provider.expectedState));
     },
-    clientId,
     options,
   );
   let received = false;

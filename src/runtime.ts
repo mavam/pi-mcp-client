@@ -110,7 +110,7 @@ export function waitFor<T>(
 }
 
 export const createSdkConnector = (storeFactory: CredentialStoreFactory = credentialStore): ConnectFactory => async (
-  _name,
+  name,
   config,
   signal,
   onToolsChanged,
@@ -148,7 +148,7 @@ export const createSdkConnector = (storeFactory: CredentialStoreFactory = creden
       })
     : new StreamableHTTPClientTransport(new URL(config.url!), {
         requestInit: { headers: config.headers },
-        authProvider: await connectionAuthProvider(config, storeFactory),
+        authProvider: await connectionAuthProvider(name, config, storeFactory),
         // Bound HTTP responses (including OAuth), but not established SSE streams.
         // The SDK bounds ordinary MCP requests with their request timeout.
         fetch: async (input, init) => {
