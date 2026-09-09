@@ -62,6 +62,11 @@ test("malformed commands fail without reflecting argument values", () => {
   }
 });
 
+test("removed OAuth switches fail with guidance and are absent from completion", () => {
+  expect(() => parseConfigCommand("add --scope global --oauth example https://example.com/mcp")).toThrow("Remove --oauth");
+  expect(configCommandCompletions("add --scope global --oauth", [])!.map((item) => item.label)).not.toContain("--oauth");
+});
+
 test("configuration completions show scopes and names, not connection values", () => {
   expect(configCommandCompletions("add ", [])!.map((entry) => entry.value)).toEqual(["add --scope global", "add --scope project"]);
   expect(configCommandCompletions("remove --scope p", [])).toEqual([{ value: "remove --scope project", label: "--scope project" }]);
@@ -151,7 +156,7 @@ test("invalid, cancelled, or malformed edits leave files intact and remove tempo
   for (const command of [
     "add --scope global --replace docs ftp://example.com",
     "add --scope global --oauth-client-id '' other https://example.com",
-    "add --scope global --oauth --header 'Authorization: private-secret' other https://example.com",
+    "add --scope global --oauth-client-id client --header 'Authorization: private-secret' other https://example.com",
   ]) await expect(f.run(command)).rejects.toThrow();
   let validations = 0;
   await expect(f.run("remove --scope global docs", true, () => {

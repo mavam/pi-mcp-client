@@ -9,7 +9,7 @@ For externally managed bearer tokens, use
 
 ## Sign in with OAuth
 
-Add the HTTP server, then log in. You don't need to specify `--oauth` first:
+Add the HTTP server, then log in:
 
 ```text
 /mcp add --scope global slack https://mcp.slack.com/mcp
@@ -32,10 +32,8 @@ HTTP servers use automatic authentication by default:
   requires OAuth, an unavailable keyring is an error; no credentials are stored
   outside the OS credential store.
 
-Existing `"oauth": true` definitions still work and require the credential store
-up front. You can remove that flag to use automatic authentication instead.
-Set `"oauth": false` to disable OAuth credential lookup and challenge handling.
-Login respects this opt-out: remove it and run `/mcp reload` before signing in.
+The `oauth` configuration field and `--oauth` switch aren't supported. Remove
+these from existing definitions and commands; HTTP authentication is automatic.
 
 If the server uses an Authorization header, login asks you to remove that header
 before switching to OAuth; it never replaces existing header credentials.
@@ -57,6 +55,13 @@ credential store, bound to the server URL, configured client ID (if any), and
 authorization-server issuer. There is no plaintext credential fallback. PKCE
 verifiers and callback state stay in memory. Linux requires a working Secret
 Service/keyring session.
+
+### Upgrade from earlier versions
+
+Credentials now use an identity based only on the server URL and optional client
+ID. Earlier credential-store entries aren't migrated or deleted. Run
+`/mcp login <server>` again after upgrading; revoke old grants at the service if
+needed. Changing scopes or the callback port doesn't select a different store.
 
 ## Use a pre-registered client
 
@@ -155,7 +160,7 @@ clients requiring a client secret aren't supported yet.
 ## Sign out
 
 Run `/mcp logout <server>` to remove stored tokens and client registrations. Logout
-also closes connections and deactivates tools for automatic or explicit OAuth servers sharing
+also closes connections and deactivates tools for OAuth servers sharing
 the same URL and configured client ID, since they share credentials. Configuration
 and enabled state stay unchanged. Disabled servers accept logout too. Header and
 server-managed credentials remain untouched.

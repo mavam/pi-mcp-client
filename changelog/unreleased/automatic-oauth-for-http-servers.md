@@ -1,21 +1,23 @@
 ---
 title: Automatic OAuth for HTTP servers
-type: change
+type: breaking
 authors:
   - mavam
 prs:
   - 19
   - 20
-created: 2026-09-09T12:38:32.886454Z
+created: 2026-09-09T12:51:16.605022Z
 ---
 
-HTTP servers now detect OAuth requirements automatically and reuse stored credentials without an `oauth` flag. Add a server by URL, then sign in when needed:
+HTTP authentication is automatic: connections reuse stored OAuth tokens, handle challenges through the MCP SDK, and preserve configured Authorization headers. Login no longer changes configuration files, and only explicit login registers a client or opens a browser.
+
+Remove the `oauth` field from server definitions and `--oauth` from commands. Both are rejected rather than retained as compatibility switches. Client IDs, scopes, and callback ports remain supported:
 
 ```text
 /mcp add --scope global slack https://mcp.slack.com/mcp
 /mcp login slack
 ```
 
-Login no longer changes configuration files. Existing Authorization headers take precedence, and only explicit login can register an OAuth client or open a browser. Public servers remain usable when the OS credential store is unavailable.
+The optional `type` field is inferred from `url` or `command`, so minimal HTTP definitions need only a URL. Public servers remain usable when the OS credential store is unavailable.
 
-Existing `"oauth": true` settings still work; `"oauth": false` disables automatic OAuth. Client IDs, scopes, and callback ports no longer require `--oauth`. The optional `type` field remains inferred from `url` or `command`, so minimal HTTP definitions need only a URL.
+Sign in again after upgrading. OAuth credential identities now depend only on the server URL and optional client ID; earlier entries aren't migrated or deleted. Revoke old grants at the service if needed. Older session results without display metadata render as plain text instead of using a compatibility formatter.

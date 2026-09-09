@@ -14,7 +14,6 @@ import { fingerprint, object, usesOAuth, type ServerConfig, type ClientOptions }
 import { oauthCallbackHtml } from "./oauth-page.js";
 import { diagnose, DiagnosticError, failure } from "./diagnostics.js";
 
-const REDIRECT = "http://127.0.0.1:19847/callback";
 export type OAuthOptions = Pick<ClientOptions, "oauthScopes" | "oauthCallbackPort">;
 export function callbackUrl(options: OAuthOptions = {}): string {
   return `http://127.0.0.1:${options.oauthCallbackPort ?? 19847}/callback`;
@@ -51,7 +50,7 @@ export interface SecretStore {
 export type CredentialStoreFactory = (url: string, clientId?: string) => Promise<SecretStore>;
 
 export function credentialKey(url: string, clientId?: string): string {
-  return fingerprint({ url, redirect: REDIRECT, clientId });
+  return fingerprint({ url, clientId });
 }
 
 // Invalidate even providers created before a login has saved its first record.
@@ -151,7 +150,7 @@ export class OAuthProvider implements OAuthClientProvider {
       // callback and scopes. Refresh/logout still use the stored client.
       const registration = this.data.registrations?.[ctx.issuer];
       if (this.redirect && stored &&
-          ((registration?.redirect ?? REDIRECT) !== this.redirectUrl ||
+          (registration?.redirect !== this.redirectUrl ||
             registration?.scope !== this.clientMetadata.scope))
         return undefined;
       return stored;
@@ -251,8 +250,6 @@ export async function connectionAuthProvider(
     return provider;
   };
   let pending: Promise<OAuthProvider> | undefined;
-  // Preserve up-front credential-store validation for explicit OAuth configurations.
-  if (config.oauth === true) pending = Promise.resolve(await create());
   const get = () => pending ??= create();
   return {
     redirectUrl: callbackUrl(config),
@@ -269,7 +266,7 @@ export async function connectionAuthProvider(
       catch (error) {
         // An unavailable store must not block an anonymous/public connection.
         // Keep the rejected promise: a later OAuth challenge fails closed in get().
-        if (!initialized && config.oauth !== true && !ctx && error instanceof DiagnosticError &&
+        if (!initialized && !ctx && error instanceof DiagnosticError &&
             error.diagnostic.code === "credential_store_unavailable") return undefined;
         throw error;
       }

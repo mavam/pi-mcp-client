@@ -101,7 +101,6 @@ Windows paths with backslashes, single quotes preserve the path verbatim.
 | `--replace` | Replace the complete definition in the selected scope, or create an override of a same-named definition in the other scope. Existing fields aren't merged. |
 | `--header 'Name: value'` | Add an HTTP header. Repeat for different header names. |
 | `--env KEY=value` | Add a stdio environment override. Repeat for different variable names. |
-| `--oauth` | Require the credential store up front for an HTTP server. Optional; authentication is automatic by default. |
 | `--oauth-client-id ID` | Use a pre-registered public client. |
 | `--oauth-scope SCOPE` | Request an OAuth scope. Repeat for additional scopes. |
 | `--oauth-callback-port PORT` | Set the loopback callback port. |

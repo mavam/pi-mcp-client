@@ -41,7 +41,7 @@ describe("configuration", () => {
       resolveServer(
         {
           url: "https://example.com",
-          oauth: true,
+          oauthClientId: "client",
           headers: { Authorization: "secret" },
         },
         "/tmp",

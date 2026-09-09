@@ -14,13 +14,15 @@ function memoryStore(): SecretStore {
   return { read: () => record, write: (value) => { record = value; }, remove: () => { record = null; } };
 }
 
-test("OAuth inference honors Authorization headers and explicit opt-out", async () => {
-  for (const config of [{ command: "server" }, { url: "https://example.com", oauth: false },
+test("OAuth inference honors Authorization headers", async () => {
+  for (const config of [{ command: "server" },
     { url: "https://example.com", headers: { aUtHoRiZaTiOn: "Bearer private" } }]) {
     expect(usesOAuth(config)).toBe(false);
     expect(await connectionAuthProvider(config, async () => { throw new Error("must not touch credentials"); })).toBeUndefined();
   }
-  for (const oauth of [undefined, true]) expect(usesOAuth({ url: "https://example.com", oauth })).toBe(true);
+  expect(usesOAuth({ url: "https://example.com" })).toBe(true);
+  for (const oauth of [true, false])
+    expect(() => parseConfig({ mcpServers: { example: { url: "https://example.com", oauth } } })).toThrow("remove oauth");
   for (const options of [{ oauthClientId: "client" }, { oauthScopes: ["read"] }, { oauthCallbackPort: 12345 }]) {
     const definition = { url: "https://example.com", ...options };
     expect(parseConfig({ mcpServers: { example: definition } }).example).toEqual(definition);
@@ -38,7 +40,7 @@ test("automatic credentials fail closed if a previously available store becomes 
 });
 
 for (const protocol of ["auto", "legacy"] as const) for (const scenario of [
-  "public", "public-locked", "stored-token", "refresh", "no-grant", "locked", "corrupt", "opt-out", "header", "explicit",
+  "public", "public-locked", "stored-token", "refresh", "no-grant", "locked", "corrupt", "header",
 ] as const) {
   test(`SDK automatic OAuth: ${scenario} (${protocol})`, async () => {
     const store = memoryStore();
@@ -84,7 +86,7 @@ for (const protocol of ["auto", "legacy"] as const) for (const scenario of [
     base = `http://127.0.0.1:${server.port}`;
     cleanup.push(async () => { await server.stop(true); });
     const url = `${base}/mcp`;
-    if (["stored-token", "refresh", "opt-out", "header", "explicit"].includes(scenario)) {
+    if (["stored-token", "refresh", "header"].includes(scenario)) {
       const provider = new OAuthProvider(url, store);
       provider.saveClientInformation({ client_id: "fixture-client", issuer: base }, { issuer: base });
       provider.saveTokens({ access_token: scenario === "refresh" ? "private-expired" : "private-valid", token_type: "Bearer", issuer: base,
@@ -92,7 +94,6 @@ for (const protocol of ["auto", "legacy"] as const) for (const scenario of [
     }
     if (scenario === "corrupt") store.write("private-corrupt-record");
     const config: ServerConfig = { url, protocol,
-      ...(scenario === "opt-out" ? { oauth: false } : scenario === "explicit" ? { oauth: true } : {}),
       ...(scenario === "header" ? { headers: { aUtHoRiZaTiOn: "Bearer private-valid" } } : {}),
     };
     const directory = await mkdtemp(join(tmpdir(), "mcp-auto-oauth-"));
@@ -104,7 +105,7 @@ for (const protocol of ["auto", "legacy"] as const) for (const scenario of [
     }));
     cleanup.push(() => runtime.close());
     const result = await runtime.discover();
-    const error = scenario === "no-grant" || scenario === "opt-out" ? "authentication_required"
+    const error = scenario === "no-grant" ? "authentication_required"
       : scenario === "locked" ? "credential_store_unavailable" : scenario === "corrupt" ? "connection_failed" : undefined;
     if (error) {
       expect(result.diagnostics[0]?.code).toBe(error);
@@ -113,8 +114,8 @@ for (const protocol of ["auto", "legacy"] as const) for (const scenario of [
     expect(registrations).toBe(0);
     expect(authorizations).toBe(0);
     expect(refreshes).toBe(scenario === "refresh" ? 1 : 0);
-    expect(accesses).toBe(scenario === "opt-out" || scenario === "header" ? 0 : 1);
+    expect(accesses).toBe(scenario === "header" ? 0 : 1);
     if (scenario === "stored-token") expect(headers[0]).toBe("Bearer private-valid");
-    if (scenario === "public" || scenario === "public-locked" || scenario === "opt-out") expect(headers.every((value) => value === null)).toBe(true);
+    if (scenario === "public" || scenario === "public-locked") expect(headers.every((value) => value === null)).toBe(true);
   });
 }

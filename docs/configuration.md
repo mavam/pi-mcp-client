@@ -115,7 +115,6 @@ server definition:
 | Field | Purpose |
 | --- | --- |
 | `description` | Short capability description for the assistant's server directory. |
-| `oauth` | Optional HTTP override. Omit for automatic authentication; `false` disables OAuth; `true` requires the credential store up front. See [authentication](authentication.md). |
 | `oauthClientId` | Optional pre-registered public client ID. Supports `${ENV_VAR}` interpolation, not secret commands. |
 | `oauthScopes` | Optional array of 1–100 unique OAuth scope tokens to request at login. Omitted scopes use SDK/server defaults. Values are literal, without interpolation. |
 | `oauthCallbackPort` | Optional loopback callback port, from 1 to 65535. Defaults to `19847`. |
@@ -126,7 +125,8 @@ server definition:
 | `protocol` | `auto` (default) for SDK protocol-version negotiation, or `legacy` for an explicit legacy handshake. |
 
 OAuth client IDs, scopes, and callback ports require HTTP without an Authorization
-header or `"oauth": false`; they don't require `"oauth": true`.
+header. HTTP authentication is automatic; remove the obsolete `oauth` field from
+existing definitions. See [authentication](authentication.md).
 
 Every definition must include a `url` or `command`, even when `disabled` is true.
 These options are specific to Pi MCP Client, not standardized MCP connection

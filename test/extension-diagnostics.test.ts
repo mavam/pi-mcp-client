@@ -162,7 +162,7 @@ test("a session switch while add waits for idle prevents mutation", async () => 
 test("removing a disabled OAuth server never accesses its credentials", async () => {
   let credentials = 0;
   const h = await host(JSON.stringify({ mcpServers: {
-    private: { url: "https://example.com/mcp", oauth: true, disabled: true },
+    private: { url: "https://example.com/mcp", disabled: true },
   } }), [], async () => { credentials++; throw new Error("must not access credentials"); });
   await h.command("remove --scope global private");
   expect(h.notifications.at(-1)).toContain("Credentials were retained");
@@ -186,7 +186,7 @@ test("logout accepts disabled servers, preserves configuration, and explains ext
   let record: string | null = null;
   const store = { read: () => record, write: (value: string) => { record = value; }, remove: () => { record = null; } };
   const configuration = JSON.stringify({ mcpServers: {
-    example: { url: "https://oauth.example/mcp", oauth: true },
+    example: { url: "https://oauth.example/mcp" },
     alias: { url: "https://oauth.example/mcp", disabled: true },
     external: { url: "https://external.example/mcp", headers: { Authorization: "!never-execute" } },
   } });
@@ -236,8 +236,8 @@ test("get and logout select only the configured OAuth client identity", async ()
     stores.set(clientId, store);
   }
   const h = await host(JSON.stringify({ mcpServers: {
-    first: { url, oauth: true, oauthClientId: "first", disabled: true },
-    second: { url, oauth: true, oauthClientId: "second" },
+    first: { url, oauthClientId: "first", disabled: true },
+    second: { url, oauthClientId: "second" },
   } }), [], async (resolved, clientId) => {
     expect(resolved).toBe(url);
     return stores.get(clientId!)!;
@@ -257,7 +257,7 @@ test("get and logout select only the configured OAuth client identity", async ()
 });
 
 test("logout reports store failures without claiming success or exposing raw errors", async () => {
-  const h = await host(JSON.stringify({ mcpServers: { example: { url: "https://oauth.example/mcp", oauth: true } } }), [],
+  const h = await host(JSON.stringify({ mcpServers: { example: { url: "https://oauth.example/mcp" } } }), [],
     async () => ({ read: () => null, write: () => {}, remove: () => { throw new Error("private-keyring-error"); } }));
   await h.command("logout example");
   expect(h.notifications.at(-1)).not.toContain("credentials removed");
@@ -268,18 +268,17 @@ test("login refuses header authentication, disabled servers, and headless use wi
   for (const definition of [
     { url: "https://example.com/mcp", headers: { aUtHoRiZaTiOn: "!never-execute" } },
     { url: "https://example.com/mcp", disabled: true },
-    { url: "https://example.com/mcp", oauth: false },
     { url: "https://example.com/mcp" },
   ]) {
     let accesses = 0;
     const configuration = JSON.stringify({ mcpServers: { example: definition } });
     const h = await host(configuration, [], async () => { accesses++; throw new Error("unexpected access"); });
-    if (!definition.headers && !definition.disabled && definition.oauth !== false) {
+    if (!definition.headers && !definition.disabled) {
       h.ctx.hasUI = false;
       await expect(h.command("login example")).rejects.toThrow("interactive session");
     } else {
       await h.command("login example");
-      expect(h.notifications.at(-1)).toContain(definition.headers ? "Authorization header" : definition.disabled ? "Disabled servers" : "explicitly disabled");
+      expect(h.notifications.at(-1)).toContain(definition.headers ? "Authorization header" : "Disabled servers");
     }
     expect(accesses).toBe(0);
     expect(await readFile(join(h.directory, "mcp.json"), "utf8")).toBe(configuration);
@@ -307,7 +306,7 @@ test("login uses the effective definition without writing global or project file
 
 test("manual login validates syntax and refuses non-interactive use before credentials", async () => {
   let accesses = 0;
-  const h = await host(JSON.stringify({ mcpServers: { example: { url: "https://example.com/mcp", oauth: true } } }), [], async () => {
+  const h = await host(JSON.stringify({ mcpServers: { example: { url: "https://example.com/mcp" } } }), [], async () => {
     accesses++;
     throw new Error("unexpected credential access");
   });
@@ -323,7 +322,7 @@ test("manual login validates syntax and refuses non-interactive use before crede
 });
 
 for (const configured of [true, false]) for (const outcome of ["success", "cancel", "shutdown"] as const) {
-  test(`manual login keeps callbacks in dialogs and handles ${outcome} (OAuth configured: ${configured})`, async () => {
+  test(`manual login keeps callbacks in dialogs and handles ${outcome} (pre-registered client: ${configured})`, async () => {
     let base = "";
     let record: string | null = null;
     let tokenRequests = 0;
@@ -343,7 +342,7 @@ for (const configured of [true, false]) for (const outcome of ["success", "cance
     } });
     base = `http://127.0.0.1:${server.port}`;
     cleanup.push(async () => { await server.stop(true); });
-    const h = await host(JSON.stringify({ mcpServers: { example: { url: `${base}/mcp`, ...(configured ? { oauth: true, oauthClientId: "public", oauthScopes: ["read"], oauthCallbackPort: 19848 } : {}) } } }), [], async () => ({
+    const h = await host(JSON.stringify({ mcpServers: { example: { url: `${base}/mcp`, ...(configured ? { oauthClientId: "public", oauthScopes: ["read"], oauthCallbackPort: 19848 } : {}) } } }), [], async () => ({
       read: () => record, write: (value) => { record = value; }, remove: () => { record = null; },
     }));
     const reconnect = spyOn(McpRuntime.prototype, "reconnect").mockResolvedValue(undefined);

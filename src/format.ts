@@ -90,7 +90,7 @@ export function formatOutput(
   blocks: DisplayBlock[] | undefined,
   theme: Theme,
 ): string {
-  if (!blocks) return formatBlock(text, {}, theme);
+  if (!blocks) return plain(text);
   let cursor = 0;
   let extraBytes = 0;
   let extraLines = 0;

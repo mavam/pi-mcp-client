@@ -123,7 +123,7 @@ export default function mcpClient(
           return errorResult(error, {
             server: tool.server,
             operation: "call",
-            oauth: config[tool.server]?.oauth,
+            oauth: usesOAuth(config[tool.server]),
             signal: ctx.signal?.aborted ? ctx.signal : signal,
           });
         }
@@ -467,7 +467,7 @@ export default function mcpClient(
         const result = errorResult(error, {
           server: args.complete?.server ?? args.read?.server ?? args.server,
           operation: hasComplete ? "complete" : hasRead ? "read" : "search",
-          oauth: config[args.complete?.server ?? args.read?.server ?? args.server ?? ""]?.oauth,
+          oauth: usesOAuth(config[args.complete?.server ?? args.read?.server ?? args.server ?? ""]),
           signal: ctx.signal?.aborted ? ctx.signal : signal,
         });
         if (args.read) {
@@ -689,8 +689,6 @@ export default function mcpClient(
             throw new CommandUsageError("OAuth login requires an HTTP server; stdio authentication is managed by the server.");
           if (Object.keys(config[server].headers ?? {}).some((name) => name.toLowerCase() === "authorization"))
             throw new CommandUsageError("This server uses an Authorization header. Remove it from the server definition before using /mcp login, or keep using header authentication.");
-          if (config[server].oauth === false)
-            throw new CommandUsageError("OAuth is explicitly disabled for this server. Remove oauth: false from its definition and run /mcp reload before login.");
           const { url, clientId } = oauthSettings(config[server], ctx.cwd);
           const options = config[server];
           const loginRuntime = current();
@@ -788,7 +786,7 @@ export default function mcpClient(
                             : action === "refresh"
                               ? "refresh"
                               : "reconnect",
-                  oauth: config[server]?.oauth,
+                  oauth: usesOAuth(config[server]),
                   signal: ctx.signal,
                 }),
               );

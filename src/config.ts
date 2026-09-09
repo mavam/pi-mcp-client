@@ -7,7 +7,6 @@ import { secretTemplate } from "./secrets.js";
 
 export interface ClientOptions {
   description?: string;
-  oauth?: boolean;
   oauthClientId?: string;
   oauthScopes?: string[];
   oauthCallbackPort?: number;
@@ -35,7 +34,6 @@ export function object(value: unknown): value is Record<string, unknown> {
 
 const OPTION_FIELDS = [
   "description",
-  "oauth",
   "oauthClientId",
   "oauthScopes",
   "oauthCallbackPort",
@@ -64,24 +62,22 @@ function validateOptions(
       fail(key);
   }
   if (entry.oauthClientId !== undefined &&
-      (entry.oauth === false || typeof entry.oauthClientId !== "string" ||
+      (typeof entry.oauthClientId !== "string" ||
         !entry.oauthClientId.trim() || entry.oauthClientId.length > 4096 ||
         /[\u0000-\u001f\u007f]/u.test(entry.oauthClientId)))
     fail("oauthClientId (requires OAuth and a nonempty client ID)");
   if (entry.oauthScopes !== undefined &&
-      (entry.oauth === false || !Array.isArray(entry.oauthScopes) ||
+      (!Array.isArray(entry.oauthScopes) ||
         entry.oauthScopes.length === 0 || entry.oauthScopes.length > 100 ||
         !entry.oauthScopes.every((scope: unknown) => typeof scope === "string" &&
           scope.length <= 256 && /^[\x21\x23-\x5b\x5d-\x7e]+$/u.test(scope)) ||
         new Set(entry.oauthScopes).size !== entry.oauthScopes.length))
     fail("oauthScopes (requires OAuth and 1–100 unique OAuth scope tokens)");
   if (entry.oauthCallbackPort !== undefined &&
-      (entry.oauth === false || !Number.isInteger(entry.oauthCallbackPort) ||
+      (!Number.isInteger(entry.oauthCallbackPort) ||
         Number(entry.oauthCallbackPort) < 1 || Number(entry.oauthCallbackPort) > 65535))
     fail("oauthCallbackPort (requires OAuth and a port from 1–65535)");
-  for (const key of ["oauth", "disabled"]) {
-    if (entry[key] !== undefined && typeof entry[key] !== "boolean") fail(key);
-  }
+  if (entry.disabled !== undefined && typeof entry.disabled !== "boolean") fail("disabled");
   if (
     entry.timeoutMs !== undefined &&
     (!Number.isInteger(entry.timeoutMs) ||
@@ -121,6 +117,8 @@ function parseConnections(value: unknown, source: string): Config {
     const fail = (field: string): never => {
       throw new Error(`${source}: invalid ${field} for server ${name}.`);
     };
+    if (Object.hasOwn(entry, "oauth"))
+      throw new Error(`${source}: remove oauth from server ${name}; HTTP authentication is automatic.`);
     for (const key of Object.keys(entry)) if (!fields.has(key)) fail(key);
     validateOptions(entry, fail);
     if (entry.type !== undefined && entry.type !== "stdio" && entry.type !== "http")
@@ -152,7 +150,7 @@ function parseConnections(value: unknown, source: string): Config {
       (entry.type === "http" && !entry.url)
     )
       fail("type (must match command or url)");
-    if (entry.command && (entry.oauth || entry.headers || entry.oauthClientId !== undefined || entry.oauthScopes !== undefined || entry.oauthCallbackPort !== undefined))
+    if (entry.command && (entry.headers || entry.oauthClientId !== undefined || entry.oauthScopes !== undefined || entry.oauthCallbackPort !== undefined))
       fail("HTTP options on stdio transport");
     if (entry.url && (entry.args || entry.cwd || entry.env))
       fail("stdio options on HTTP transport");
@@ -350,7 +348,7 @@ export function resolveServer(config: ServerConfig, cwd: string): ServerConfig {
     result.url = url.href;
   }
   if (
-    (result.oauth || result.oauthClientId !== undefined || result.oauthScopes !== undefined || result.oauthCallbackPort !== undefined) &&
+    (result.oauthClientId !== undefined || result.oauthScopes !== undefined || result.oauthCallbackPort !== undefined) &&
     Object.keys(result.headers ?? {}).some(
       (key) => key.toLowerCase() === "authorization",
     )
@@ -359,10 +357,10 @@ export function resolveServer(config: ServerConfig, cwd: string): ServerConfig {
   return result;
 }
 
-/** Authorization headers take precedence over automatic OAuth; false opts out. */
-export function usesOAuth(config: ServerConfig): boolean {
-  return Boolean(config.url) && config.oauth !== false &&
-    !Object.keys(config.headers ?? {}).some((name) => name.toLowerCase() === "authorization");
+/** HTTP authentication is automatic unless an Authorization header is configured. */
+export function usesOAuth(config: ServerConfig | undefined): boolean {
+  return Boolean(config?.url) &&
+    !Object.keys(config?.headers ?? {}).some((name) => name.toLowerCase() === "authorization");
 }
 
 export function fingerprint(value: unknown): string {

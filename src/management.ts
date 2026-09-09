@@ -103,7 +103,7 @@ export function inspectTool(tool: CatalogTool): string {
 
 /** Resolve only the credential identity, never headers or secret commands. */
 export function oauthSettings(config: ServerConfig, cwd: string): { url: string; clientId?: string } {
-  const resolved = resolveServer({ url: config.url, oauth: true, oauthClientId: config.oauthClientId }, cwd);
+  const resolved = resolveServer({ url: config.url, oauthClientId: config.oauthClientId }, cwd);
   return { url: resolved.url!, clientId: resolved.oauthClientId };
 }
 
@@ -114,9 +114,7 @@ export async function authenticationSummary(
 ): Promise<string> {
   if (!usesOAuth(config)) return config.command
     ? "Server-managed (stdio)"
-    : Object.keys(config.headers ?? {}).length
-      ? "Headers (externally managed)"
-      : "OAuth disabled";
+    : "Headers (externally managed)";
   const method = config.oauthClientId === undefined ? "OAuth" : "OAuth (pre-registered public client)";
   try {
     const { url, clientId } = oauthSettings(config, cwd);
@@ -141,7 +139,7 @@ export function inspectServer(
     `Server: ${name}`,
     `Transport: ${config.command ? "stdio" : "HTTP"}`,
     `Protocol: ${config.protocol ?? "auto"}`,
-    `OAuth: ${usesOAuth(config) ? config.oauth === true ? "enabled" : "automatic" : "disabled"}`,
+    `OAuth: ${usesOAuth(config) ? "automatic" : "not used"}`,
     ...(usesOAuth(config) ? [
       `Requested scopes: ${config.oauthScopes?.map(line).join(", ") ?? "SDK/server defaults"}`,
       `OAuth callback: http://127.0.0.1:${config.oauthCallbackPort ?? 19847}/callback`,
