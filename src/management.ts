@@ -147,6 +147,8 @@ export function inspectServer(
     ] : []),
     ...(authentication ? [`Authentication: ${authentication}`] : []),
     `Timeout: ${config.timeoutMs ? `${config.timeoutMs} ms` : "default"}`,
+    ...(config.startupTimeoutMs !== undefined ? [`Startup timeout: ${config.startupTimeoutMs} ms`] : []),
+    ...(config.toolTimeoutMs !== undefined ? [`Tool timeout: ${config.toolTimeoutMs} ms`] : []),
     ...(config.command
       ? [
           "Command and working directory: hidden",

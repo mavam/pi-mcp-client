@@ -56,12 +56,19 @@ export async function runImportCommand(
   const cancel = () => ctx.ui.notify("Import cancelled. Nothing was saved.", "info");
   if (source.ignoredTopLevel) {
     const proceed = await select(
-      `Import file contains ${source.ignoredTopLevel} other top-level setting(s)\nOnly the top-level mcpServers object is imported. Other settings and nested projects are not imported.`,
+      `Import file contains ${source.ignoredTopLevel} other top-level setting(s)\nOnly MCP server definitions are imported. Other settings, permissions, and credential stores are not imported.`,
       ["Continue", "Cancel import"],
     );
     if (proceed !== "Continue") { cancel(); return; }
   }
-  for (const [index, candidate] of source.candidates.entries()) {
+  let candidates = source.candidates;
+  if (source.groups) {
+    const group = await select("Choose Claude source group\nSource projects are not destination scopes. Review each selected definition; names are never merged automatically.",
+      [...source.groups, "All groups", "Cancel import"]);
+    if (group === undefined || group === "Cancel import") { cancel(); return; }
+    if (group !== "All groups") candidates = candidates.filter((candidate) => candidate.group === group);
+  }
+  for (const [index, candidate] of candidates.entries()) {
     const problem = validateImportCandidate(candidate, ctx.cwd);
     let name = candidate.name;
     while (true) {
@@ -72,7 +79,7 @@ export async function runImportCommand(
         Object.hasOwn(scopes.project, name) ? "project" : undefined,
       ].filter(Boolean).join(" and ") : "";
       const choice = await select([
-        `Import preview ${index + 1}/${source.candidates.length} · ${scope} scope`,
+        `Import preview ${index + 1}/${candidates.length} · ${scope} scope · ${source.format === "codex" ? "Codex TOML" : "JSON"}`,
         importPreview(candidate, problem),
         ...(name ? [`Destination name: ${name}`] : []),
         ...(conflict ? [`Existing definition in ${conflict} scope; fields and credentials are never merged.`] : []),

@@ -228,3 +228,19 @@ test("the source cannot be overwritten and concurrent import dialogs are refused
   await h.command();
   expect(h.notifications.at(-1)).toContain("Imported 1");
 });
+
+for (const cancel of [true, false]) {
+  test(`Claude source group selection ${cancel ? "cancels" : "imports only the chosen project"}`, async () => {
+    const h = await host();
+    await writeFile(h.source, JSON.stringify({ projects: {
+      "/one": { mcpServers: { shared: { command: "first-project" } } },
+      "/two": { mcpServers: { shared: { command: "second-project" } } },
+    } }));
+    h.ui.select = async (title, choices) => title.startsWith("Choose Claude source group")
+      ? cancel ? undefined : choices.find((choice) => choice.includes("/two"))
+      : choose(title, choices);
+    await h.command();
+    expect(JSON.parse(await readFile(h.destination, "utf8")).mcpServers).toEqual(cancel ? {} : { shared: { command: "second-project" } });
+    expect(h.credentials()).toBe(0);
+  });
+}

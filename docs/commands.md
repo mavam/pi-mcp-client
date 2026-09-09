@@ -13,7 +13,7 @@ separate interface is documented in the [tool reference](tool-reference.md).
 | `/mcp`, `/mcp list`, `/mcp status` | Show a server status matrix with catalog and loaded-tool counts. |
 | `/mcp add --scope <scope> [options] <server> <url>` | Save an HTTP server without connecting. For stdio, use `<server> -- <command> [args...]`. |
 | `/mcp remove --scope <scope> <server>` | Remove a definition from the selected scope, retaining credentials. |
-| `/mcp import --scope <scope> <path>` | Preview and select servers from a Claude/Cursor-style JSON file, then confirm a scoped import. |
+| `/mcp import --scope <scope> <path>` | Preview and select servers from Claude/Cursor JSON or Codex TOML, then confirm a scoped import. |
 | `/mcp get <server>` | Inspect status and configuration, including disabled servers. Connection values are hidden. |
 | `/mcp tools <server>` | Browse the server's tools and inspect descriptions without activating tools. |
 | `/mcp prompts <server>` | Browse prompt metadata, then select a prompt and enter arguments. |
@@ -181,9 +181,12 @@ until you separate them. Empty configuration files are retained rather than dele
 
 ## Import server definitions
 
-Import from an explicitly named local JSON file:
+Import directly from an explicitly named local file. JSON and TOML are detected
+automatically; no conversion file is needed:
 
 ```text
+/mcp import --scope global ~/.codex/config.toml
+/mcp import --scope global ~/.claude.json
 /mcp import --scope project "/path with spaces/mcp.json"
 ```
 
@@ -192,19 +195,23 @@ The command requires an interactive TUI or RPC session and an explicit
 Relative source paths resolve against Pi's current directory; `~/` is supported.
 The path isn't evaluated by a shell, and no application settings are scanned.
 
-1. If the source contains other top-level settings, confirm that only
-   `mcpServers` should be considered. Nested project settings aren't traversed.
-2. Review each server's name, transport, enabled state, and any validation or
+1. If the source contains other top-level settings, confirm that only MCP server
+   definitions should be considered. Model, permission, and credential-store
+   settings aren't imported.
+2. For a Claude file containing `projects.<path>.mcpServers`, choose a source
+   group or **All groups**. Global and project definitions remain separate during
+   review. A source project doesn't select or authorize the destination scope.
+3. Review each server's name, transport, enabled state, and any validation or
    unsupported-field problems. Commands, arguments, URLs, headers, and environment
    values stay hidden. Review the original file before importing connections you
    don't already trust. Unsupported entries can only be skipped; their fields
    aren't silently dropped.
-3. Choose **Skip**, add the definition, or **Choose a different name**. Name
+4. Choose **Skip**, add the definition, or **Choose a different name**. Name
    conflicts require an explicit replacement or override choice. A replacement
    replaces the entire definition, including headers and environment variables;
    credentials and other fields aren't merged. A global import shadowed by a
    project definition is labeled as such and doesn't change the effective server.
-4. Review the selected destination names and actions, then confirm the import.
+5. Review the selected destination names and actions, then confirm the import.
    The confirmation warns that inline credentials are copied with the selected
    definitions. Existing Pi OAuth credentials are retained, but no external
    credential store is read or migrated.
@@ -218,20 +225,45 @@ destination cannot be the same file. No server starts, secret command runs,
 login opens, or tool activates during import. Enabled connections become
 available on demand afterward; imported disabled servers stay disabled.
 
-The initial format is a top-level `mcpServers` object in strict UTF-8 JSON, limited
-to 1 MiB and 100 servers. Supported server fields are `type`, `command`, `args`,
-`cwd`, `env`, `url`, `headers`, `disabled`, and `description`. Only stdio and
-Streamable HTTP are supported. JSON comments, trailing commas, SSE, nested Claude
-project settings, VS Code, Codex, and MCPorter formats aren't supported.
+### Supported formats
 
+Files must be UTF-8 and are limited to 1 MiB and 100 servers across all source
+groups. Only stdio and Streamable HTTP are supported. JSON comments, JSON trailing
+commas, SSE, VS Code, and MCPorter formats aren't supported. TOML comments,
+multiline strings, quoted keys, and trailing commas follow TOML syntax.
+
+**Claude/Cursor JSON:** Read a top-level `mcpServers` object and, for Claude,
+`projects.<path>.mcpServers` groups. Supported server fields are `type`, `command`,
+`args`, `cwd`, `env`, `url`, `headers`, `disabled`, and `description`.
 `${VAR}` references are preserved and must resolve in Pi before import. Default
 expressions and client-specific variables such as `${env:TOKEN}` or
 `${workspaceFolder}` are refused rather than translated. In environment and
 header values, bare `$VAR` and leading `!` remain literal: the importer escapes
-them so they don't become Pi variable expansions or secret commands. Other
-connection values retain Pi's normal interpolation rules. Relative executable,
-argument, and working-directory paths retain Pi's path semantics, not the source
-application's or import file's directory; verify them before importing.
+them so they don't become Pi variable expansions or secret commands.
+
+**Codex TOML:** Read the `mcp_servers` table, with these mappings:
+
+| Codex setting | Imported setting |
+| --- | --- |
+| `command`, `args`, `cwd`, `url` | Copied without resolving values. Literal `${...}` in these fields is refused because Pi would interpolate it. |
+| `enabled` | Inverted to `disabled`. |
+| `env`, `http_headers` | Literal environment/header values, including literal `${VAR}`, `$VAR`, and `!`. |
+| `env_vars`, `env_http_headers`, `bearer_token_env_var` | Unresolved environment references, not copies of their current values. Overlapping entries are refused. |
+| `startup_timeout_sec` or `startup_timeout_ms` | `startupTimeoutMs`, defaulting to Codex's 10 seconds. Both source options together are refused. |
+| `tool_timeout_sec` | `toolTimeoutMs`, defaulting to Codex's 60 seconds. |
+| `enabled_tools`, `disabled_tools` | `includeTools`, `excludeTools`. Names containing `*` are refused rather than converted into wildcard patterns. |
+| `scopes` | `oauthScopes`. |
+
+Timeouts must fit Pi's 100–600000 ms range. Startup and tool deadlines stay
+separate; they don't replace the timeout for metadata or resource requests.
+Only local execution is supported. `required = true`, remote environment
+placement, remote `env_vars` entries, and per-server/tool approval policies are
+refused rather than dropped. `required = false` and
+`experimental_environment = "local"` are accepted.
+
+For either format, relative executable, argument, and working-directory paths
+retain Pi's path semantics, not the source application's or import file's
+directory; verify them before importing.
 
 ## Watch resource changes
 

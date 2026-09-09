@@ -14,6 +14,8 @@ export interface ClientOptions {
   includeTools?: string[];
   excludeTools?: string[];
   timeoutMs?: number;
+  startupTimeoutMs?: number;
+  toolTimeoutMs?: number;
   protocol?: "legacy" | "auto";
 }
 
@@ -41,6 +43,8 @@ const OPTION_FIELDS = [
   "includeTools",
   "excludeTools",
   "timeoutMs",
+  "startupTimeoutMs",
+  "toolTimeoutMs",
   "protocol",
 ] as const;
 
@@ -78,13 +82,11 @@ function validateOptions(
         Number(entry.oauthCallbackPort) < 1 || Number(entry.oauthCallbackPort) > 65535))
     fail("oauthCallbackPort (requires OAuth and a port from 1–65535)");
   if (entry.disabled !== undefined && typeof entry.disabled !== "boolean") fail("disabled");
-  if (
-    entry.timeoutMs !== undefined &&
-    (!Number.isInteger(entry.timeoutMs) ||
-      Number(entry.timeoutMs) < 100 ||
-      Number(entry.timeoutMs) > 600_000)
-  )
-    fail("timeoutMs (100–600000)");
+  for (const field of ["timeoutMs", "startupTimeoutMs", "toolTimeoutMs"]) {
+    if (entry[field] !== undefined &&
+        (!Number.isInteger(entry[field]) || Number(entry[field]) < 100 || Number(entry[field]) > 600_000))
+      fail(`${field} (100–600000)`);
+  }
   if (
     entry.protocol !== undefined &&
     entry.protocol !== "legacy" &&

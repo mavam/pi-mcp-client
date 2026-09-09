@@ -2,6 +2,8 @@ import { constants } from "node:fs";
 import { open, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
+import { parse as parseToml } from "smol-toml";
+import { adaptCodexServer, CODEX_FIELDS } from "./codex-import.js";
 import { commandWords } from "./config-commands.js";
 import { ConfigMutationError, object, parseConfig, resolveServer, type ConfigScope, type ServerConfig } from "./config.js";
 
@@ -19,10 +21,13 @@ export interface ImportCandidate {
   definition?: ServerConfig;
   problem?: string;
   escapedLiterals: boolean;
+  group?: string;
 }
 export interface ImportSource {
+  format: "json" | "codex";
   candidates: ImportCandidate[];
   ignoredTopLevel: number;
+  groups?: string[];
 }
 
 export function parseImportCommand(input: string): { scope: ConfigScope; path: string } {
@@ -47,37 +52,61 @@ function hasUnsupportedTemplate(value: unknown): boolean {
   return false;
 }
 
-/** A deliberately narrow adapter for top-level Claude/Cursor-style mcpServers JSON. */
+/** Detect the file syntax, then adapt known MCP sections without loading client settings. */
 export function parseImportSource(text: string): ImportSource {
   if (Buffer.byteLength(text, "utf8") > MAX_IMPORT_BYTES)
     throw new ConfigMutationError("Import file exceeds 1 MiB. Split it into smaller files.");
   let value: unknown;
+  let format: ImportSource["format"] = "json";
   try { value = JSON.parse(text); }
-  catch { throw new ConfigMutationError("Import file is not valid JSON. Comments, trailing commas, and TOML are not supported."); }
-  if (!object(value) || !object(value.mcpServers))
-    throw new ConfigMutationError("Expected a top-level mcpServers object. Nested Claude project settings, VS Code, Codex, and MCPorter formats are not supported.");
-  const entries = Object.entries(value.mcpServers);
+  catch {
+    try { value = parseToml(text, { integersAsBigInt: "asNeeded" }); format = "codex"; }
+    catch { throw new ConfigMutationError("Import file is not valid JSON or TOML. JSON comments and trailing commas are not supported."); }
+  }
+  if (!object(value)) throw new ConfigMutationError("Expected an MCP configuration object.");
+  const sections: { label: string; servers: Record<string, unknown> }[] = [];
+  const key = format === "codex" ? "mcp_servers" : "mcpServers";
+  if (Object.hasOwn(value, key)) {
+    if (!object(value[key]) || value[key] instanceof Date)
+      throw new ConfigMutationError("The MCP server section must be an object or table.");
+    sections.push({ label: "Global servers", servers: value[key] });
+  }
+  if (format === "json" && object(value.projects)) {
+    for (const [path, project] of Object.entries(value.projects)) {
+      if (!object(project) || !Object.hasOwn(project, "mcpServers")) continue;
+      if (!object(project.mcpServers)) throw new ConfigMutationError("A Claude project has an invalid mcpServers section.");
+      if (Object.keys(project.mcpServers).length)
+        sections.push({ label: `Project ${sections.length + 1}: ${JSON.stringify(path).slice(0, 120)}`, servers: project.mcpServers });
+    }
+  }
+  if (!sections.length)
+    throw new ConfigMutationError("Expected mcpServers in JSON, Claude projects with mcpServers, or mcp_servers in Codex TOML. VS Code and MCPorter formats are not supported.");
+  const grouped = sections.some((section) => section.label !== "Global servers");
+  const entries = sections.flatMap((section) => Object.entries(section.servers).map(([name, raw]) => ({ name, raw, group: grouped ? section.label : undefined })));
   if (entries.length > MAX_IMPORT_SERVERS)
-    throw new ConfigMutationError("Import file exceeds 100 servers. Split it into smaller files.");
-  const candidates = entries.map(([name, raw], index): ImportCandidate => {
+    throw new ConfigMutationError("Import file exceeds 100 servers across its source groups. Split it into smaller files.");
+  const candidates = entries.map(({ name, raw, group }, index): ImportCandidate => {
     const candidate: ImportCandidate = {
       name: validImportName(name) ? name : undefined,
       label: validImportName(name) ? name : `Entry ${index + 1} (requires a new name)`,
       transport: object(raw) && typeof raw.command === "string" ? "stdio"
         : object(raw) && typeof raw.url === "string" ? "HTTP" : "unsupported",
       escapedLiterals: false,
+      ...(group ? { group } : {}),
     };
     if (!object(raw)) return { ...candidate, problem: "The server definition must be an object." };
-    const unknown = Object.keys(raw).filter((key) => !FIELDS.has(key));
+    const unknown = Object.keys(raw).filter((key) => !(format === "codex" ? CODEX_FIELDS : FIELDS).has(key));
     if (unknown.length) return { ...candidate, problem: `${unknown.length} unsupported server field(s). Review the source file; this entry cannot be imported.` };
     if (raw.type !== undefined && raw.type !== "stdio" && raw.type !== "http")
       return { ...candidate, transport: "unsupported", problem: "Unsupported transport. Only stdio and Streamable HTTP can be imported; SSE is not converted." };
     try {
-      const definition = parseConfig({ mcpServers: { imported: raw } }).imported;
-      if (hasUnsupportedTemplate(definition))
+      const adapted = format === "codex" ? adaptCodexServer(raw) : { definition: raw, escapedLiterals: false };
+      const definition = parseConfig({ mcpServers: { imported: adapted.definition } }).imported;
+      candidate.escapedLiterals = adapted.escapedLiterals;
+      if (format === "json" && hasUnsupportedTemplate(definition))
         return { ...candidate, problem: "Unsupported variable syntax. Only ${VAR} references are supported, without defaults or client-specific variables." };
       for (const field of ["env", "headers"] as const) {
-        if (!definition[field]) continue;
+        if (format === "codex" || !definition[field]) continue;
         definition[field] = Object.fromEntries(Object.entries(definition[field]).map(([key, value]) => {
           const escaped = escapeSecretLiteral(value);
           if (escaped !== value) candidate.escapedLiterals = true;
@@ -86,10 +115,14 @@ export function parseImportSource(text: string): ImportSource {
       }
       return { ...candidate, definition };
     } catch {
-      return { ...candidate, problem: "Invalid server fields or conflicting transport options. Review the source file; this entry cannot be imported." };
+      return { ...candidate, problem: "Invalid or unsupported server settings, literal syntax, or conflicting options. Review the source file; this entry cannot be imported." };
     }
   });
-  return { candidates, ignoredTopLevel: Object.keys(value).filter((key) => key !== "mcpServers").length };
+  return {
+    format, candidates,
+    ignoredTopLevel: Object.keys(value).filter((field) => field !== key && !(grouped && field === "projects")).length,
+    ...(grouped ? { groups: sections.map((section) => section.label) } : {}),
+  };
 }
 
 /** Read a bounded snapshot of an explicitly named regular file, never a URL or stream. */
@@ -119,7 +152,7 @@ export async function readImportSource(path: string, cwd: string, signal?: Abort
   } catch (error) {
     if (error instanceof ConfigMutationError) throw error;
     signal?.throwIfAborted();
-    throw new ConfigMutationError("Cannot read import file as UTF-8 JSON. Check its encoding and read permissions.");
+    throw new ConfigMutationError("Cannot read import file as UTF-8 JSON or TOML. Check its encoding and read permissions.");
   } finally { await file.close(); }
 }
 
@@ -136,13 +169,15 @@ export function importPreview(candidate: ImportCandidate, problem?: string): str
   const definition = candidate.definition;
   return [
     `${candidate.label} · ${candidate.transport}`,
+    ...(candidate.group ? [`Source: ${candidate.group}`] : []),
     ...(problem ? [problem] : []),
     ...(definition ? [
       "Connection values are hidden; review and trust the source file before importing.",
       `Arguments: ${definition.args?.length ?? 0}; environment: ${Object.keys(definition.env ?? {}).length}; headers: ${Object.keys(definition.headers ?? {}).length} (values hidden)`,
       `Imported state: ${definition.disabled ? "disabled" : "enabled; connections open on demand"}`,
+      ...(definition.startupTimeoutMs !== undefined ? [`Startup timeout: ${definition.startupTimeoutMs} ms; tool timeout: ${definition.toolTimeoutMs} ms`] : []),
       ...(candidate.transport === "stdio" ? ["Relative paths use Pi's working directory, not the import file's directory."] : []),
-      ...(candidate.escapedLiterals ? ["Env/header literals are escaped to avoid executing !commands or expanding bare $VAR."] : []),
+      ...(candidate.escapedLiterals ? ["Env/header literals are escaped; only explicit source environment references expand."] : []),
     ] : []),
   ].join("\n");
 }
