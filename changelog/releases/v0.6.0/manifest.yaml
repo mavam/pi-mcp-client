@@ -1,0 +1,9 @@
+created: 2026-09-09
+title: Safer MCP configuration and authentication
+intro: >-
+  This release makes MCP authentication failures actionable and adds safe, previewable
+  imports from Claude, Cursor, and Codex configurations. It also adds per-server OAuth
+  accounts and interactive previews for server-provided prompts.
+source:
+  mode: sync-stable-queue
+  previous_stable: v0.5.0
