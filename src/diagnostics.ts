@@ -78,7 +78,7 @@ export function diagnostic(
       "Check mcpServers in mcp.json / .mcp.json, including inline server options and environment variables. Move options from any top-level pi section into mcpServers.<server>. Reload Pi after editing.",
     authentication_required: context.oauth
       ? `Run /mcp login ${target}.`
-      : "Check the Authorization header, or enable mcpServers.<server>.oauth and authenticate with /mcp login <server>.",
+      : `For OAuth, run /mcp login ${target}. If you use an Authorization header, check its credentials instead.`,
     permission_denied:
       "Check the account's permissions, OAuth scopes, and service access policy.",
     credential_store_unavailable:

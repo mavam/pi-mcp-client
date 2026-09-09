@@ -197,6 +197,7 @@ export async function loadConfig(
 export type ConfigScope = "global" | "project";
 export type ConfigMutation =
   | { action: "toggle"; server: string; disabled: boolean }
+  | { action: "oauth"; server: string; expected: ServerConfig }
   | { action: "add"; server: string; scope: ConfigScope; definition: ServerConfig; replace: boolean }
   | { action: "remove"; server: string; scope: ConfigScope };
 
@@ -225,11 +226,12 @@ export async function updateServerConfig(
   mutation: ConfigMutation,
   validate: (config: Config) => void,
 ): Promise<{ config: Config; scope: ConfigScope }> {
-  if (mutation.action !== "toggle" && mutation.scope === "project" && !trusted)
+  const scoped = mutation.action === "add" || mutation.action === "remove";
+  if (scoped && mutation.scope === "project" && !trusted)
     throw new ConfigMutationError("Project configuration requires a trusted project. Use global scope or trust the project first.");
   const paths = [join(agentDir, "mcp.json"), ...(trusted ? [join(cwd, ".mcp.json")] : [])];
   const targets = await Promise.all(paths.map(configTarget));
-  if (mutation.action !== "toggle" && targets.length === 2 && targets[0] === targets[1])
+  if (scoped && targets.length === 2 && targets[0] === targets[1])
     throw new ConfigMutationError("Global and project configuration share a file; separate them before scoped edits.");
   const locks = [...new Set(targets)].sort();
   const locked = async (index: number): Promise<{ config: Config; scope: ConfigScope }> => {
@@ -239,8 +241,8 @@ export async function updateServerConfig(
     const parsed = documents.map((document, index) => document === undefined
       ? Object.create(null) as Config : parseConfig(document, paths[index]));
     const { server } = mutation;
-    let source = mutation.action === "toggle" ? -1 : mutation.scope === "global" ? 0 : 1;
-    if (mutation.action === "toggle") {
+    let source = scoped ? mutation.scope === "global" ? 0 : 1 : -1;
+    if (!scoped) {
       for (const [index, config] of parsed.entries()) if (Object.hasOwn(config, server)) source = index;
       if (source < 0) throw new ConfigMutationError("Server is no longer configured. Run /mcp reload.");
     }
@@ -257,6 +259,16 @@ export async function updateServerConfig(
       if (!Object.hasOwn(document.mcpServers, server))
         throw new ConfigMutationError("Server is not defined in the selected scope. No configuration was changed.");
       delete document.mcpServers[server];
+    } else if (mutation.action === "oauth") {
+      const definition = document.mcpServers[server];
+      if (JSON.stringify(parsed[source][server]) !== JSON.stringify(mutation.expected))
+        throw new ConfigMutationError("Server configuration changed. Run /mcp reload and retry login.");
+      if (!definition.url || definition.disabled)
+        throw new ConfigMutationError("OAuth login requires an enabled HTTP server.");
+      if (Object.keys(definition.headers ?? {}).some((name) => name.toLowerCase() === "authorization"))
+        throw new ConfigMutationError("This server uses an Authorization header. Remove it from the server definition before using /mcp login, or keep using header authentication.");
+      changed = definition.oauth !== true;
+      if (changed) definition.oauth = true;
     } else {
       changed = Boolean(document.mcpServers[server].disabled) !== mutation.disabled;
       if (changed) document.mcpServers[server].disabled = mutation.disabled;

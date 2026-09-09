@@ -9,10 +9,22 @@ For externally managed bearer tokens, use
 
 ## Sign in with OAuth
 
-1. Set `"oauth": true` in the HTTP server definition, without an Authorization
-   header.
-2. Run `/mcp reload` to apply the configuration.
-3. Run `/mcp login <server>` and complete sign-in in your browser.
+Add the HTTP server, then log in. You don't need to specify `--oauth` first:
+
+```text
+/mcp add --scope global slack https://mcp.slack.com/mcp
+/mcp login slack
+```
+
+Login enables `"oauth": true` in the effective server definition (the trusted
+project override, if present; otherwise the global definition), applies it, and
+starts the SDK's OAuth discovery and authorization flow. Other settings are
+preserved. The OAuth setting remains enabled if sign-in fails or you cancel, so
+you can retry login. Adding a server still doesn't connect or open a browser.
+
+If the server uses an Authorization header, login asks you to remove that header
+before switching to OAuth; it never replaces existing header credentials.
+Stdio servers manage their own authentication and don't support OAuth login.
 
 The extension supports public clients with dynamic registration or a
 pre-registered client ID. Both use PKCE and a loopback callback at

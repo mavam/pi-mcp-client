@@ -684,10 +684,10 @@ export default function mcpClient(
             throw new CommandUsageError(
               "OAuth requires an interactive session. Use an Authorization header for headless access.",
             );
-          if (!config[server].oauth || !config[server].url)
-            throw new CommandUsageError(
-              "Enable oauth in this HTTP server's mcpServers definition in mcp.json first.",
-            );
+          if (!config[server].url)
+            throw new CommandUsageError("OAuth login requires an HTTP server; stdio authentication is managed by the server.");
+          if (Object.keys(config[server].headers ?? {}).some((name) => name.toLowerCase() === "authorization"))
+            throw new CommandUsageError("This server uses an Authorization header. Remove it from the server definition before using /mcp login, or keep using header authentication.");
           const { url, clientId } = oauthSettings(config[server], ctx.cwd);
           const open = async (target: string) => {
             // Authorization URLs stay out of notifications and session history.
@@ -706,6 +706,12 @@ export default function mcpClient(
           loginController = controller;
           const signal = AbortSignal.any([controller.signal, ...(ctx.signal ? [ctx.signal] : [])]);
           try {
+            if (!config[server].oauth) {
+              const scope = await reloadConfiguration(ctx, { action: "oauth", server, expected: config[server] });
+              signal.throwIfAborted();
+              if (generation !== sessionGeneration) throw failure("cancelled", { server, operation: "auth" });
+              ctx.ui.notify(`✔︎ ${server}: OAuth enabled in ${scope} configuration. This setting is retained if sign-in fails or is cancelled.`, "info");
+            }
             const store = await storeFactory(url, clientId);
             const options = config[server];
             const summary = `Requested scopes: ${options.oauthScopes?.join(", ") ?? "SDK/server defaults"}\nCallback: http://127.0.0.1:${options.oauthCallbackPort ?? 19847}/callback`;

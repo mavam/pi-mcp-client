@@ -23,6 +23,38 @@ async function fixture() {
   return { root, agentDir, cwd, run, validate };
 }
 
+test("login enables OAuth in the effective scope without replacing other fields", async () => {
+  for (const trusted of [true, false]) {
+    const f = await fixture();
+    await f.run("add --scope global example https://global.example/mcp");
+    await f.run("add --scope project --replace --header 'X-Key: !never-run' example https://project.example/mcp");
+    const global = join(f.agentDir, "mcp.json");
+    const project = join(f.cwd, ".mcp.json");
+    const untouched = trusted ? global : project;
+    const before = await readFile(untouched, "utf8");
+    const expected = (await loadConfig(f.agentDir, f.cwd, trusted)).example;
+    const result = await updateServerConfig(f.agentDir, f.cwd, trusted, { action: "oauth", server: "example", expected }, f.validate);
+    expect(result.scope).toBe(trusted ? "project" : "global");
+    expect(result.config.example).toEqual({ ...expected, oauth: true });
+    expect(await readFile(untouched, "utf8")).toBe(before);
+    expect((await loadConfig(f.agentDir, f.cwd, trusted)).example).toEqual(result.config.example);
+  }
+});
+
+test("login rejects stale definitions and Authorization headers without writing", async () => {
+  const f = await fixture();
+  await f.run("add --scope global example https://example.com/mcp");
+  const expected = (await loadConfig(f.agentDir, f.cwd, false)).example;
+  await f.run("add --scope global --replace --header 'aUtHoRiZaTiOn: !never-run' example https://example.com/mcp");
+  const path = join(f.agentDir, "mcp.json");
+  const before = await readFile(path, "utf8");
+  await expect(updateServerConfig(f.agentDir, f.cwd, false, { action: "oauth", server: "example", expected }, f.validate)).rejects.toThrow("configuration changed");
+  await expect(updateServerConfig(f.agentDir, f.cwd, false, {
+    action: "oauth", server: "example", expected: (await loadConfig(f.agentDir, f.cwd, false)).example,
+  }, f.validate)).rejects.toThrow("Authorization header");
+  expect(await readFile(path, "utf8")).toBe(before);
+});
+
 test("configuration command parsing preserves quoted argv without shell expansion", () => {
   expect(commandWords(`node 'two words' "" "C:\\tools\\server.js" ';' '$(touch marker)' '*.ts' '${"${VALUE}"}'`))
     .toEqual(["node", "two words", "", "C:\\tools\\server.js", ";", "$(touch marker)", "*.ts", "${VALUE}"]);
