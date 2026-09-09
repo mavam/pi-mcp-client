@@ -16,6 +16,7 @@ import { diagnose, DiagnosticError, failure } from "./diagnostics.js";
 const REDIRECT = "http://127.0.0.1:19847/callback";
 interface Credentials {
   url: string;
+  clientId?: string;
   clients: Record<string, StoredOAuthClientInformation>;
   tokens?: StoredOAuthTokens;
 }
@@ -24,12 +25,16 @@ export interface SecretStore {
   write(value: string): void;
   remove(): void;
 }
-export type CredentialStoreFactory = (url: string) => Promise<SecretStore>;
+export type CredentialStoreFactory = (url: string, clientId?: string) => Promise<SecretStore>;
+
+export function credentialKey(url: string, clientId?: string): string {
+  return fingerprint({ url, redirect: REDIRECT, clientId });
+}
 
 // Invalidate even providers created before a login has saved its first record.
 const credentialEpochs = new Map<string, number>();
 
-export async function credentialStore(url: string): Promise<SecretStore> {
+export async function credentialStore(url: string, clientId?: string): Promise<SecretStore> {
   // Loaded only for OAuth servers. Fail closed if the OS store is unavailable.
   const protect = <T>(action: () => T): T => {
     try {
@@ -40,7 +45,7 @@ export async function credentialStore(url: string): Promise<SecretStore> {
   };
   try {
     const { Entry } = await import("@napi-rs/keyring");
-    const entry = new Entry("pi-mcp-client", fingerprint({ url, redirect: REDIRECT }));
+    const entry = new Entry("pi-mcp-client", credentialKey(url, clientId));
     return {
       read: () => protect(() => entry.getPassword()),
       write: (value) => protect(() => entry.setPassword(value)),
@@ -64,6 +69,7 @@ export class OAuthProvider implements OAuthClientProvider {
   private data: Credentials;
   private snapshot: string | null;
   private readonly epoch: number;
+  private readonly key: string;
   private verifier?: string;
   private discovery?: OAuthDiscoveryState;
   readonly expectedState = randomUUID();
@@ -71,8 +77,10 @@ export class OAuthProvider implements OAuthClientProvider {
     readonly url: string,
     private readonly store: SecretStore,
     private readonly redirect?: (url: URL) => void | Promise<void>,
+    private readonly clientId?: string,
   ) {
-    this.epoch = credentialEpochs.get(url) ?? 0;
+    this.key = credentialKey(url, clientId);
+    this.epoch = credentialEpochs.get(this.key) ?? 0;
     const raw = store.read();
     this.snapshot = raw;
     if (raw) {
@@ -80,16 +88,17 @@ export class OAuthProvider implements OAuthClientProvider {
       if (
         !object(data) ||
         data.url !== url ||
+        data.clientId !== clientId ||
         !object(data.clients) ||
         (data.tokens !== undefined &&
           (!object(data.tokens) || typeof data.tokens.access_token !== "string"))
       )
         throw new Error("Invalid OAuth credential record.");
       this.data = data as unknown as Credentials;
-    } else this.data = { url, clients: {} };
+    } else this.data = { url, clientId, clients: {} };
   }
   private assertCurrent() {
-    if ((credentialEpochs.get(this.url) ?? 0) !== this.epoch || this.store.read() !== this.snapshot)
+    if ((credentialEpochs.get(this.key) ?? 0) !== this.epoch || this.store.read() !== this.snapshot)
       throw failure("authentication_required", { operation: "auth", oauth: true });
   }
   private save() {
@@ -104,15 +113,23 @@ export class OAuthProvider implements OAuthClientProvider {
   }
   clientInformation(ctx?: OAuthClientInformationContext) {
     this.assertCurrent();
-    return ctx && Object.hasOwn(this.data.clients, ctx.issuer)
-      ? this.data.clients[ctx.issuer]
-      : undefined;
+    if (!ctx) return undefined;
+    const stored = Object.hasOwn(this.data.clients, ctx.issuer) ? this.data.clients[ctx.issuer] : undefined;
+    if (!this.clientId) return stored;
+    // A configured public ID is not a secret, but a successful grant pins it to
+    // its issuer. Require explicit logout before trusting a replacement issuer.
+    if ((this.data.tokens?.issuer && this.data.tokens.issuer !== ctx.issuer) ||
+        (Object.keys(this.data.clients).length && !stored))
+      throw failure("oauth_issuer_changed", { operation: "auth", oauth: true });
+    return { client_id: this.clientId, issuer: ctx.issuer };
   }
   saveClientInformation(
     info: StoredOAuthClientInformation,
     ctx?: OAuthClientInformationContext,
   ) {
     if (!ctx) throw new Error("OAuth client registration has no issuer.");
+    if (this.clientId && (info.client_id !== this.clientId || info.client_secret))
+      throw new Error("Cannot replace the configured public OAuth client.");
     this.data.clients = { ...this.data.clients, [ctx.issuer]: info };
     this.save();
   }
@@ -122,6 +139,11 @@ export class OAuthProvider implements OAuthClientProvider {
     return !ctx || tokens?.issuer === ctx.issuer ? tokens : undefined;
   }
   saveTokens(tokens: StoredOAuthTokens) {
+    if (this.clientId) {
+      if (!tokens.issuer) throw new Error("OAuth tokens have no issuer.");
+      const info = this.clientInformation({ issuer: tokens.issuer })!;
+      this.data.clients = { ...this.data.clients, [tokens.issuer]: info };
+    }
     this.data.tokens = tokens;
     this.save();
   }
@@ -167,12 +189,13 @@ export async function logout(
   url: string,
   store: SecretStore,
   signal?: AbortSignal,
+  clientId?: string,
 ): Promise<Revocation> {
   let tokens: StoredOAuthTokens | undefined;
   let client: StoredOAuthClientInformation | undefined;
   let readable = true;
   try {
-    const provider = new OAuthProvider(url, store);
+    const provider = new OAuthProvider(url, store, undefined, clientId);
     tokens = provider.tokens();
     if (tokens?.issuer) client = provider.clientInformation({ issuer: tokens.issuer });
   } catch {
@@ -180,7 +203,8 @@ export async function logout(
     readable = false;
   }
   store.remove();
-  credentialEpochs.set(url, (credentialEpochs.get(url) ?? 0) + 1);
+  const key = credentialKey(url, clientId);
+  credentialEpochs.set(key, (credentialEpochs.get(key) ?? 0) + 1);
   if (!readable) return "unconfirmed";
   if (!tokens) return "not-needed";
   if (!tokens.issuer || !client) return "unconfirmed";
@@ -229,15 +253,14 @@ export async function authenticate(
   open: (url: string) => Promise<void>,
   signal?: AbortSignal,
   store?: SecretStore,
+  clientId?: string,
 ): Promise<void> {
   const provider = new OAuthProvider(
     url,
-    store ?? (await credentialStore(url)),
+    store ?? (await credentialStore(url, clientId)),
     (target) => open(target.href),
+    clientId,
   );
-  // Explicit authentication should offer a fresh grant, not just refresh an old one.
-  const interactive = provider as OAuthProvider & { forceReauthorization: boolean };
-  interactive.forceReauthorization = true;
   const deadline = AbortSignal.any([
     AbortSignal.timeout(120_000),
     ...(signal ? [signal] : []),
@@ -272,7 +295,8 @@ export async function authenticate(
       server.listen(19847, "127.0.0.1", resolve);
     });
     deadline.throwIfAborted();
-    const result = await auth(provider, { serverUrl: url, fetchFn });
+    // Explicit login offers a fresh grant, rather than silently refreshing the old one.
+    const result = await auth(provider, { serverUrl: url, fetchFn, forceReauthorization: true });
     if (result === "AUTHORIZED") return;
     const params = await new Promise<URLSearchParams>((resolve, reject) => {
       const abort = () =>
@@ -288,7 +312,6 @@ export async function authenticate(
     });
     if (params.has("error") || !params.get("code"))
       throw new Error("OAuth authorization was not granted.");
-    interactive.forceReauthorization = false;
     const { StreamableHTTPClientTransport } = await import(
       "@modelcontextprotocol/client"
     );

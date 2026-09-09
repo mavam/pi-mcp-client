@@ -8,6 +8,7 @@ import { secretTemplate } from "./secrets.js";
 export interface ClientOptions {
   description?: string;
   oauth?: boolean;
+  oauthClientId?: string;
   disabled?: boolean;
   includeTools?: string[];
   excludeTools?: string[];
@@ -33,6 +34,7 @@ export function object(value: unknown): value is Record<string, unknown> {
 const OPTION_FIELDS = [
   "description",
   "oauth",
+  "oauthClientId",
   "disabled",
   "includeTools",
   "excludeTools",
@@ -57,6 +59,11 @@ function validateOptions(
     )
       fail(key);
   }
+  if (entry.oauthClientId !== undefined &&
+      (entry.oauth !== true || typeof entry.oauthClientId !== "string" ||
+        !entry.oauthClientId.trim() || entry.oauthClientId.length > 4096 ||
+        /[\u0000-\u001f\u007f]/u.test(entry.oauthClientId)))
+    fail("oauthClientId (requires oauth: true and a nonempty client ID)");
   for (const key of ["oauth", "disabled"]) {
     if (entry[key] !== undefined && typeof entry[key] !== "boolean") fail(key);
   }
@@ -248,7 +255,12 @@ export function resolveServer(config: ServerConfig, cwd: string): ServerConfig {
     env: map(config.env),
     headers: map(config.headers),
     url: config.url && interpolate(config.url),
+    oauthClientId: config.oauthClientId === undefined ? undefined : interpolate(config.oauthClientId),
   };
+  if (result.oauthClientId !== undefined &&
+      (!result.oauthClientId.trim() || result.oauthClientId.length > 4096 ||
+        /[\u0000-\u001f\u007f]/u.test(result.oauthClientId)))
+    throw new Error("OAuth client ID must be nonempty and contain no control characters.");
   if (config.command)
     result.cwd = resolve(
       cwd,

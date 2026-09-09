@@ -16,9 +16,9 @@ stays redacted, discovery never activates tools, and authentication stays explic
   status in `/mcp get`, including disabled servers. Logout preserves configuration,
   distinguishes local removal from remote revocation, and explains externally
   managed credentials without changing them.
-- [ ] **Pre-registered OAuth clients (following):** Support an explicitly configured
-  client ID for servers without dynamic registration, preserving issuer binding
-  and OS-backed credentials.
+- [x] **Pre-registered OAuth clients:** `oauthClientId` supports public clients on
+  servers without dynamic registration, with issuer binding and separate OS-backed
+  credentials per configured client ID.
 - [ ] **Configuration commands:** Add explicit `/mcp add` and `/mcp remove`
   operations with scope selection and validation. Adding must not execute a server;
   removing configuration must be distinct from logout and disabling.
@@ -41,9 +41,10 @@ and [Claude Code MCP](https://code.claude.com/docs/en/mcp).
   stale catalogs without silently replacing an active tool contract.
 - [ ] **Resource and prompt catalog notifications:** Extend notification handling
   when those capabilities are implemented.
-- [ ] **OAuth interoperability:** Support pre-registered clients and additional
-  client-registration mechanisms where supported by the SDK and server. Preserve
-  issuer binding and OS-backed credential storage.
+- [ ] **Additional OAuth interoperability:** Support confidential pre-registered
+  clients and client ID metadata documents where supported by the SDK and server.
+  Public pre-registered clients are implemented. Preserve issuer binding and
+  OS-backed credential storage.
 - [x] **Credential management:** Logout, credential removal, and best-effort token
   revocation when supported, with safe stored-credential status.
 - [ ] **Account and grant identity:** Show verified account or grant information

@@ -115,6 +115,36 @@ test("logout accepts disabled servers, preserves configuration, and explains ext
   } finally { disconnect.mockRestore(); discover.mockRestore(); }
 });
 
+test("get and logout select only the configured OAuth client identity", async () => {
+  const stores = new Map<string, { read: () => string | null; write: (value: string) => void; remove: () => void }>();
+  const url = "https://clients.example/mcp";
+  for (const clientId of ["first", "second"]) {
+    let record: string | null = null;
+    const store = { read: () => record, write: (value: string) => { record = value; }, remove: () => { record = null; } };
+    new OAuthProvider(url, store, undefined, clientId).saveTokens({ access_token: "private-token", token_type: "Bearer", issuer: "https://issuer.example" });
+    stores.set(clientId, store);
+  }
+  const h = await host(JSON.stringify({ mcpServers: {
+    first: { url, oauth: true, oauthClientId: "first", disabled: true },
+    second: { url, oauth: true, oauthClientId: "second" },
+  } }), [], async (resolved, clientId) => {
+    expect(resolved).toBe(url);
+    return stores.get(clientId!)!;
+  });
+  await h.command("get first");
+  expect(h.notifications.at(-1)).toContain("pre-registered public client");
+  expect(h.notifications.at(-1)).toContain("stored tokens");
+  const disconnect = spyOn(McpRuntime.prototype, "disconnect");
+  try {
+    h.ctx.signal = AbortSignal.abort(); // Skip remote revocation; local deletion still completes.
+    await h.command("logout first");
+    expect(disconnect).toHaveBeenCalledWith(["first"]);
+    expect(stores.get("first")!.read()).toBeNull();
+    expect(stores.get("second")!.read()).not.toBeNull();
+    expect(h.notifications.at(-1)).toContain("local OAuth credentials removed");
+  } finally { disconnect.mockRestore(); }
+});
+
 test("logout reports store failures without claiming success or exposing raw errors", async () => {
   const h = await host(JSON.stringify({ mcpServers: { example: { url: "https://oauth.example/mcp", oauth: true } } }), [],
     async () => ({ read: () => null, write: () => {}, remove: () => { throw new Error("private-keyring-error"); } }));
