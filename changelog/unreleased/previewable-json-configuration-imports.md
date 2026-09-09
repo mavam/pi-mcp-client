@@ -3,7 +3,9 @@ title: Previewable JSON configuration imports
 type: feature
 authors:
   - mavam
-created: 2026-09-09T16:50:37.618638Z
+prs:
+  - 25
+created: 2026-09-09T16:54:01.76736Z
 ---
 
 You can now import server definitions from a local Claude/Cursor-style JSON file instead of adding each connection by hand:
