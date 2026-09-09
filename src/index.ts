@@ -7,7 +7,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { loadConfig, setServerDisabled, resolveServer, allowed, object, type Config } from "./config.js";
-import { inspectServer, inspectTool, serverMatrix, toolPickerLabel } from "./management.js";
+import { authenticationSummary, oauthUrl, inspectServer, inspectTool, serverMatrix, toolPickerLabel } from "./management.js";
 import {
   DEFAULT_SEARCH_LIMIT,
   MAX_SEARCH_LIMIT,
@@ -17,7 +17,7 @@ import {
   summarize,
   type CatalogTool,
 } from "./catalog.js";
-import { authenticate } from "./auth.js";
+import { authenticate, credentialStore, logout, type CredentialStoreFactory } from "./auth.js";
 import { McpRuntime, ToolContractError } from "./runtime.js";
 import { Exposure, restoredTools, TOOLS_TOOL } from "./exposure.js";
 import { convertResult, textResult, type ClientDetails } from "./output.js";
@@ -58,9 +58,10 @@ function errorResult(error: unknown, context: DiagnosticContext) {
 
 export default function mcpClient(
   pi: ExtensionAPI,
-  options: { agentDir?: string } = {},
+  options: { agentDir?: string; credentialStore?: CredentialStoreFactory } = {},
 ): void {
   const agentDir = options.agentDir ?? getAgentDir();
+  const storeFactory = options.credentialStore ?? credentialStore;
   let runtime: McpRuntime | undefined;
   let config: Config = {};
   let configError: DiagnosticError | undefined;
@@ -375,9 +376,9 @@ export default function mcpClient(
 
   pi.registerCommand("mcp", {
     description:
-      "Manage MCP servers: list, status, reload, enable|disable|get|tools|login|reconnect|refresh <server>",
+      "Manage MCP servers: list, status, reload, enable|disable|get|tools|login|logout|reconnect|refresh <server>",
     getArgumentCompletions(prefix) {
-      const serverActions = ["enable", "disable", "get", "tools", "login", "reconnect", "refresh"];
+      const serverActions = ["enable", "disable", "get", "tools", "login", "logout", "reconnect", "refresh"];
       const input = prefix.trimStart();
       const match = /^(\S+)\s+(.*)$/s.exec(input);
       if (!match) {
@@ -390,7 +391,7 @@ export default function mcpClient(
       return Object.keys(config)
         .filter((name) =>
           name.startsWith(partialServer) &&
-          (action === "get" || (action === "enable" ? config[name].disabled : !config[name].disabled)),
+          (["get", "logout"].includes(action) || (action === "enable" ? config[name].disabled : !config[name].disabled)),
         )
         .sort()
         // Pi replaces the complete argument prefix, not just the server token.
@@ -438,9 +439,45 @@ export default function mcpClient(
         ) {
           if (ctx.hasUI)
             ctx.ui.notify(
-              inspectServer(server, config[server], current().status(server)),
+              inspectServer(server, config[server], current().status(server),
+                await authenticationSummary(config[server], ctx.cwd, storeFactory)),
               "info",
             );
+          return;
+        }
+        if (action === "logout" && server && !extra.length && Object.hasOwn(config, server)) {
+          if (!config[server].oauth) {
+            if (ctx.hasUI) ctx.ui.notify(
+              `${server}: no managed OAuth credentials. Header and server credentials are externally managed; configuration was not changed.`, "info",
+            );
+            return;
+          }
+          const url = oauthUrl(config[server], ctx.cwd);
+          const store = await storeFactory(url);
+          if (generation !== sessionGeneration)
+            throw new CommandUsageError("The Pi session changed during logout.");
+          // Definitions sharing this URL also share the OS credential record.
+          const related = Object.keys(config).filter((name) => {
+            try { return config[name].oauth && oauthUrl(config[name], ctx.cwd) === url; }
+            catch { return false; }
+          });
+          await current().disconnect(related);
+          if (generation !== sessionGeneration)
+            throw new CommandUsageError("The Pi session changed during logout.");
+          pi.setActiveTools(pi.getActiveTools().filter((name) =>
+            !related.includes(exposure.definitions.get(name)?.server ?? ""),
+          ));
+          const revocation = await logout(url, store, ctx.signal);
+          const detail = {
+            confirmed: "The authorization server accepted token revocation.",
+            unsupported: "The authorization server does not advertise token revocation; remote access may remain valid.",
+            unconfirmed: "Remote revocation could not be confirmed; revoke access at the service if needed.",
+            "not-needed": "No stored tokens needed revocation.",
+          }[revocation];
+          if (ctx.hasUI) ctx.ui.notify(
+            `✔︎ ${server}: local OAuth credentials removed; related connections closed and tools deactivated. ${detail} Configuration is unchanged. Other running Pi sessions may need to reconnect.`,
+            revocation === "unconfirmed" || revocation === "unsupported" ? "warning" : "info",
+          );
           return;
         }
         if ((action === "status" || action === "list") && !server) {
@@ -460,7 +497,7 @@ export default function mcpClient(
           config[server].disabled
         )
           throw new CommandUsageError(
-            "Usage: /mcp list|status|reload or /mcp enable|disable|get|tools|login|reconnect|refresh <server>. Disabled servers accept enable, disable, and get.",
+            "Usage: /mcp list|status|reload or /mcp enable|disable|get|tools|login|logout|reconnect|refresh <server>. Disabled servers accept enable, disable, get, and logout.",
           );
         if (action === "tools") {
           if (!ctx.hasUI)
@@ -510,6 +547,7 @@ export default function mcpClient(
                   : "xdg-open";
             await pi.exec(command, [target], { timeout: 5000 }).catch(() => {});
           };
+          const store = await storeFactory(url);
           if (ctx.mode === "tui") {
             let authError: unknown;
             const ok = await ctx.ui.custom<boolean>((tui, theme, _keys, done) => {
@@ -518,7 +556,7 @@ export default function mcpClient(
                 theme,
                 `Waiting for ${server} authentication…`,
               );
-              void authenticate(url, open, loader.signal).then(
+              void authenticate(url, open, loader.signal, store).then(
                 () => {
                   loader.dispose();
                   done(true);
@@ -533,13 +571,13 @@ export default function mcpClient(
             });
             if (!ok)
               throw authError ?? failure("cancelled", { server, operation: "auth" });
-          } else await authenticate(url, open, ctx.signal);
+          } else await authenticate(url, open, ctx.signal, store);
           await current().reconnect(server);
         } else if (action === "reconnect") await current().reconnect(server);
         else if (action === "refresh") await current().catalog(server, ctx.signal, true);
         else
           throw new CommandUsageError(
-            "Unknown MCP command. Use /mcp list|status|reload or /mcp enable|disable|get|tools|login|reconnect|refresh <server>.",
+            "Unknown MCP command. Use /mcp list|status|reload or /mcp enable|disable|get|tools|login|logout|reconnect|refresh <server>.",
           );
         if (ctx.hasUI)
           ctx.ui.notify(
@@ -558,7 +596,7 @@ export default function mcpClient(
                       ? "configuration"
                       : action === "tools"
                         ? "search"
-                        : action === "login"
+                        : ["login", "logout"].includes(action)
                           ? "auth"
                           : action === "refresh"
                             ? "refresh"

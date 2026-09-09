@@ -98,6 +98,7 @@ function store(): SecretStore {
   let data: string | null = null;
   return {
     read: () => data,
+    remove: () => { data = null; },
     write: (value) => {
       data = value;
     },

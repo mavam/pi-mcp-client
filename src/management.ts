@@ -1,5 +1,6 @@
 import { line, plain, type CatalogTool } from "./catalog.js";
-import { object, type ServerConfig } from "./config.js";
+import { object, resolveServer, type ServerConfig } from "./config.js";
+import { credentialStore, OAuthProvider, type CredentialStoreFactory } from "./auth.js";
 import type { ServerStatus } from "./runtime.js";
 import { truncateToWidth } from "@earendil-works/pi-tui";
 
@@ -100,11 +101,38 @@ export function inspectTool(tool: CatalogTool): string {
   ].join("\n\n");
 }
 
+/** Resolve only the credential identity, never headers or secret commands. */
+export function oauthUrl(config: ServerConfig, cwd: string): string {
+  return resolveServer({ url: config.url, oauth: true }, cwd).url!;
+}
+
+export async function authenticationSummary(
+  config: ServerConfig,
+  cwd: string,
+  storeFactory: CredentialStoreFactory = credentialStore,
+): Promise<string> {
+  if (!config.oauth) return config.command
+    ? "Server-managed (stdio)"
+    : Object.keys(config.headers ?? {}).length
+      ? "Headers (externally managed)"
+      : "None configured";
+  try {
+    const url = oauthUrl(config, cwd);
+    const provider = new OAuthProvider(url, await storeFactory(url));
+    return provider.tokens()
+      ? "OAuth · stored tokens (validity not checked)"
+      : "OAuth · no stored tokens";
+  } catch {
+    return "OAuth · credential status unavailable";
+  }
+}
+
 /** Never render connection values: credentials can occur in URLs, args, or commands. */
 export function inspectServer(
   name: string,
   config: ServerConfig,
   status: string,
+  authentication?: string,
 ): string {
   return [
     status,
@@ -112,6 +140,7 @@ export function inspectServer(
     `Transport: ${config.command ? "stdio" : "HTTP"}`,
     `Protocol: ${config.protocol ?? "auto"}`,
     `OAuth: ${config.oauth ? "enabled" : "disabled"}`,
+    ...(authentication ? [`Authentication: ${authentication}`] : []),
     `Timeout: ${config.timeoutMs ? `${config.timeoutMs} ms` : "default"}`,
     ...(config.command
       ? [

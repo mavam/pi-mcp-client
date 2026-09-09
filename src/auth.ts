@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import {
   auth,
+  discoverOAuthServerInfo,
   type OAuthClientProvider,
   type OAuthClientInformationContext,
   type OAuthClientMetadata,
@@ -21,7 +22,12 @@ interface Credentials {
 export interface SecretStore {
   read(): string | null;
   write(value: string): void;
+  remove(): void;
 }
+export type CredentialStoreFactory = (url: string) => Promise<SecretStore>;
+
+// Invalidate even providers created before a login has saved its first record.
+const credentialEpochs = new Map<string, number>();
 
 export async function credentialStore(url: string): Promise<SecretStore> {
   // Loaded only for OAuth servers. Fail closed if the OS store is unavailable.
@@ -38,6 +44,7 @@ export async function credentialStore(url: string): Promise<SecretStore> {
     return {
       read: () => protect(() => entry.getPassword()),
       write: (value) => protect(() => entry.setPassword(value)),
+      remove: () => protect(() => { entry.deleteCredential(); }),
     };
   } catch {
     throw failure("credential_store_unavailable", { operation: "auth" });
@@ -55,6 +62,8 @@ export class OAuthProvider implements OAuthClientProvider {
     application_type: "native",
   };
   private data: Credentials;
+  private snapshot: string | null;
+  private readonly epoch: number;
   private verifier?: string;
   private discovery?: OAuthDiscoveryState;
   readonly expectedState = randomUUID();
@@ -63,7 +72,9 @@ export class OAuthProvider implements OAuthClientProvider {
     private readonly store: SecretStore,
     private readonly redirect?: (url: URL) => void | Promise<void>,
   ) {
+    this.epoch = credentialEpochs.get(url) ?? 0;
     const raw = store.read();
+    this.snapshot = raw;
     if (raw) {
       const data: unknown = JSON.parse(raw);
       if (
@@ -77,13 +88,22 @@ export class OAuthProvider implements OAuthClientProvider {
       this.data = data as unknown as Credentials;
     } else this.data = { url, clients: {} };
   }
+  private assertCurrent() {
+    if ((credentialEpochs.get(this.url) ?? 0) !== this.epoch || this.store.read() !== this.snapshot)
+      throw failure("authentication_required", { operation: "auth", oauth: true });
+  }
   private save() {
-    this.store.write(JSON.stringify(this.data));
+    // Never let a late refresh resurrect credentials removed by another provider.
+    this.assertCurrent();
+    const record = JSON.stringify(this.data);
+    this.store.write(record);
+    this.snapshot = record;
   }
   state() {
     return this.expectedState;
   }
   clientInformation(ctx?: OAuthClientInformationContext) {
+    this.assertCurrent();
     return ctx && Object.hasOwn(this.data.clients, ctx.issuer)
       ? this.data.clients[ctx.issuer]
       : undefined;
@@ -97,6 +117,7 @@ export class OAuthProvider implements OAuthClientProvider {
     this.save();
   }
   tokens(ctx?: OAuthClientInformationContext) {
+    this.assertCurrent();
     const tokens = this.data.tokens;
     return !ctx || tokens?.issuer === ctx.issuer ? tokens : undefined;
   }
@@ -136,6 +157,69 @@ export class OAuthProvider implements OAuthClientProvider {
     if (scope === "all" || scope === "verifier") this.verifier = undefined;
     if (scope === "all" || scope === "discovery") this.discovery = undefined;
     this.save();
+  }
+}
+
+export type Revocation = "confirmed" | "unsupported" | "unconfirmed" | "not-needed";
+
+/** Local removal is unconditional; revocation is bounded, issuer-bound, and best effort. */
+export async function logout(
+  url: string,
+  store: SecretStore,
+  signal?: AbortSignal,
+): Promise<Revocation> {
+  let tokens: StoredOAuthTokens | undefined;
+  let client: StoredOAuthClientInformation | undefined;
+  let readable = true;
+  try {
+    const provider = new OAuthProvider(url, store);
+    tokens = provider.tokens();
+    if (tokens?.issuer) client = provider.clientInformation({ issuer: tokens.issuer });
+  } catch {
+    // Corrupt records must still be removable. Never render the raw record/error.
+    readable = false;
+  }
+  store.remove();
+  credentialEpochs.set(url, (credentialEpochs.get(url) ?? 0) + 1);
+  if (!readable) return "unconfirmed";
+  if (!tokens) return "not-needed";
+  if (!tokens.issuer || !client) return "unconfirmed";
+  const deadline = AbortSignal.any([AbortSignal.timeout(5000), ...(signal ? [signal] : [])]);
+  const fetchFn = (input: string | URL | Request, init?: RequestInit) => fetch(input, {
+    ...init,
+    signal: AbortSignal.any([deadline, ...(init?.signal ? [init.signal] : [])]),
+  });
+  try {
+    const info = await discoverOAuthServerInfo(url, { fetchFn });
+    const metadata = info.authorizationServerMetadata;
+    if (info.authorizationServerUrl !== tokens.issuer || metadata?.issuer !== tokens.issuer)
+      return "unconfirmed";
+    const endpoint = "revocation_endpoint" in metadata ? metadata.revocation_endpoint : undefined;
+    if (typeof endpoint !== "string") return "unsupported";
+    const target = new URL(endpoint);
+    if (target.username || target.password || target.hash ||
+        (target.protocol !== "https:" && !(target.protocol === "http:" &&
+          ["localhost", "127.0.0.1", "[::1]"].includes(target.hostname))))
+      return "unconfirmed";
+    // Only public clients are supported. Do not guess a confidential auth method.
+    if (client.client_secret) return "unconfirmed";
+    for (const [hint, token] of [
+      ["refresh_token", tokens.refresh_token],
+      ["access_token", tokens.access_token],
+    ] as const) {
+      if (!token) continue;
+      const response = await fetchFn(target, {
+        method: "POST",
+        redirect: "error",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ token, token_type_hint: hint, client_id: client.client_id }),
+      });
+      await response.body?.cancel();
+      if (!response.ok) return "unconfirmed";
+    }
+    return "confirmed";
+  } catch {
+    return "unconfirmed";
   }
 }
 

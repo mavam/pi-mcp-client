@@ -95,6 +95,37 @@ async function fixture() {
   };
 }
 
+test("disconnect closes selected connections and clears their catalog without reconnecting", async () => {
+  const f = await fixture();
+  const runtime = new McpRuntime({ example: { command: "fixture" }, other: { command: "fixture" } }, f.directory, join(f.directory, "cache"), f.connect);
+  cleanup.push(() => runtime.close());
+  await runtime.catalog("example");
+  await runtime.catalog("other");
+  expect(f.connects()).toBe(2);
+  await runtime.disconnect(["example", "disabled"]);
+  expect(runtime.serverStatuses().find((row) => row.name === "example")?.state).toBe("disconnected");
+  expect(runtime.serverStatuses().find((row) => row.name === "example")?.catalogSize).toBeUndefined();
+  expect(runtime.serverStatuses().find((row) => row.name === "other")?.state).toBe("connected");
+  expect(f.connects()).toBe(2);
+  expect((await readdir(join(f.directory, "cache"))).length).toBe(1);
+  await runtime.catalog("example");
+  expect(f.connects()).toBe(3);
+});
+
+test("disconnect rejects unsettled discovery before closing any selected connection", async () => {
+  const f = await fixture();
+  let finish!: () => void;
+  const gate = new Promise<void>((resolve) => { finish = resolve; });
+  const runtime = new McpRuntime({ example: { command: "fixture" } }, f.directory, join(f.directory, "cache"),
+    async (...args) => { await gate; return f.connect(...args); });
+  cleanup.push(() => runtime.close());
+  const pending = runtime.catalog("example", undefined, true);
+  try {
+    await expect(runtime.disconnect(["example"])).rejects.toThrow("busy");
+  } finally { finish(); await pending; }
+  await runtime.disconnect(["example"]);
+});
+
 test("secret commands run only once per shared connection and rerun on reconnect", async () => {
   const f = await fixture();
   await writeFile(join(f.directory, "token"), "first-secret");

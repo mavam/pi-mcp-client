@@ -6,14 +6,16 @@ import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import extension from "../src/index.js";
 import { restoredTools } from "../src/exposure.js";
+import { prepareTool } from "../src/catalog.js";
 import { McpRuntime } from "../src/runtime.js";
+import { OAuthProvider, type CredentialStoreFactory } from "../src/auth.js";
 
 const cleanup: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
   for (const fn of cleanup.splice(0).reverse()) await fn();
 });
 
-async function host(configuration: string, excluded: string[] = []) {
+async function host(configuration: string, excluded: string[] = [], credentialStore?: CredentialStoreFactory) {
   const directory = await mkdtemp(join(tmpdir(), "mcp-diags-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   await writeFile(join(directory, "mcp.json"), configuration);
@@ -33,7 +35,7 @@ async function host(configuration: string, excluded: string[] = []) {
         active = names.filter((name) => !excluded.includes(name));
       },
     } as unknown as ExtensionAPI,
-    { agentDir: directory },
+    { agentDir: directory, credentialStore },
   );
   const ctx = {
     cwd: directory,
@@ -68,6 +70,58 @@ async function host(configuration: string, excluded: string[] = []) {
     command: (args: string) => commands.get("mcp").handler(args, ctx),
   };
 }
+
+test("logout accepts disabled servers, preserves configuration, and explains external credentials", async () => {
+  let record: string | null = null;
+  const store = { read: () => record, write: (value: string) => { record = value; }, remove: () => { record = null; } };
+  const configuration = JSON.stringify({ mcpServers: {
+    example: { url: "https://oauth.example/mcp", oauth: true },
+    alias: { url: "https://oauth.example/mcp", oauth: true, disabled: true },
+    external: { url: "https://external.example/mcp", headers: { Authorization: "!never-execute" } },
+  } });
+  const h = await host(configuration, [], async () => store);
+  const provider = new OAuthProvider("https://oauth.example/mcp", store);
+  provider.saveTokens({ access_token: "private-token", token_type: "Bearer" });
+  await h.command("get alias");
+  expect(h.notifications.at(-1)).toContain("stored tokens (validity not checked)");
+  expect(h.notifications.at(-1)).not.toContain("private-token");
+  const disconnect = spyOn(McpRuntime.prototype, "disconnect");
+  const discover = spyOn(McpRuntime.prototype, "discover").mockResolvedValue({
+    tools: [prepareTool("example", "fixture", { name: "echo", inputSchema: { type: "object" } })],
+    diagnostics: [], unavailable: [], warnings: [],
+  });
+  try {
+    h.setActiveTools(["mcp_tools", "unrelated"]);
+    await h.execute("mcp_tools", { activate: ["example.echo"] });
+    expect(h.activeTools()).toContain("mcp__example__echo");
+    await h.command("logout alias");
+    expect(disconnect).toHaveBeenCalledWith(["example", "alias"]);
+    expect(record).toBeNull();
+    expect(h.notifications.at(-1)).toContain("local OAuth credentials removed");
+    expect(h.notifications.at(-1)).toContain("Remote revocation could not be confirmed");
+    expect(h.activeTools()).toEqual(["mcp_tools", "unrelated"]);
+    await h.command("logout alias");
+    expect(h.notifications.at(-1)).toContain("No stored tokens");
+    await h.command("get alias");
+    expect(h.notifications.at(-1)).toContain("no stored tokens");
+    await h.command("logout external");
+    expect(h.notifications.at(-1)).toContain("externally managed");
+    expect(await readFile(join(h.directory, "mcp.json"), "utf8")).toBe(configuration);
+    expect(h.commands.get("mcp").getArgumentCompletions("logout a")).toEqual([{ value: "logout alias", label: "alias" }]);
+    for (const input of ["logout", "logout missing", "logout alias extra"] ) {
+      await h.command(input);
+      expect(h.notifications.at(-1)).toContain("Usage:");
+    }
+  } finally { disconnect.mockRestore(); discover.mockRestore(); }
+});
+
+test("logout reports store failures without claiming success or exposing raw errors", async () => {
+  const h = await host(JSON.stringify({ mcpServers: { example: { url: "https://oauth.example/mcp", oauth: true } } }), [],
+    async () => ({ read: () => null, write: () => {}, remove: () => { throw new Error("private-keyring-error"); } }));
+  await h.command("logout example");
+  expect(h.notifications.at(-1)).not.toContain("credentials removed");
+  expect(h.notifications.at(-1)).not.toContain("private-keyring-error");
+});
 
 test("removed command names fail without connecting and login uses the new name", async () => {
   const h = await host(JSON.stringify({ mcpServers: { example: { command: "never-start" } } }));
@@ -273,7 +327,7 @@ test("command completion suggests actions first and servers only after an action
   } }));
   const complete = h.commands.get("mcp").getArgumentCompletions;
   expect(complete("")).toEqual(
-    ["list", "status", "reload", "enable", "disable", "get", "tools", "login", "reconnect", "refresh"]
+    ["list", "status", "reload", "enable", "disable", "get", "tools", "login", "logout", "reconnect", "refresh"]
       .map((value) => ({ value, label: value })),
   );
   expect(complete("to")).toEqual([{ value: "tools", label: "tools" }]);

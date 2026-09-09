@@ -101,6 +101,7 @@ not the displayed link label.
 | `/mcp enable <server>` | Enable a server in its effective configuration file. |
 | `/mcp disable <server>` | Disable a server, close its connection, and deactivate its tools. |
 | `/mcp login <server>` | Authenticate an OAuth-enabled HTTP server. |
+| `/mcp logout <server>` | Remove local OAuth credentials and attempt remote revocation, including for disabled servers. |
 | `/mcp reconnect <server>` | Replace a connection and refresh its catalog. |
 | `/mcp refresh <server>` | Refresh a server's catalog without loading additional tools. |
 
@@ -264,7 +265,10 @@ sessions pick up the saved change when they reload their MCP configuration.
 Use `/mcp get <server>` to check the effective transport, protocol, filters,
 and connection status without connecting or running secret commands. Connection
 values—including commands, arguments, URLs, headers, and environment variables—
-are hidden because any of them can contain credentials.
+are hidden because any of them can contain credentials. Authentication status shows
+whether OAuth tokens are stored, not whether they are valid. A locked or unavailable
+credential store is reported separately from missing tokens. Header and stdio
+credentials are identified as externally managed; inspection never executes them.
 
 Use `/mcp tools <server>` to fetch the current catalog and browse a scrollable
 list. Each row shows the tool name and description, trimmed to the terminal width
@@ -304,6 +308,19 @@ OAuth tokens and client registrations are stored in the operating system
 credential store, bound to the server URL and authorization-server issuer.
 There is no plaintext credential fallback. PKCE verifiers and callback state stay
 in memory.
+
+Run `/mcp logout <server>` to remove stored tokens and client registrations. Logout
+also closes connections and deactivates tools for configured OAuth servers sharing
+the same URL, since they share credentials. Configuration and enabled state stay
+unchanged. Disabled servers accept logout too. Header and server-managed credentials
+remain untouched.
+
+Local removal happens before a bounded attempt to revoke tokens at the original
+authorization server. The result distinguishes accepted revocation, unsupported
+revocation, and unconfirmed revocation. When revocation isn't confirmed, remove the
+grant at the service if needed. Repeating logout is safe. Other running Pi sessions
+may need to reconnect; logout cannot recall requests already sent to a server.
+No browser opens until you explicitly run `/mcp login <server>`.
 
 The initial implementation supports dynamically registered public clients with a
 local callback at `http://127.0.0.1:19847/callback`. The browser must be able to

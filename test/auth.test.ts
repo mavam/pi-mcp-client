@@ -5,6 +5,7 @@ test("SDK OAuth round trip validates callback state and stores tokens", async ()
   let record: string | null = null;
   const store: SecretStore = {
     read: () => record,
+    remove: () => { record = null; },
     write: (value) => {
       record = value;
     },
