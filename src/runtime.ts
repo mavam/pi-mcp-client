@@ -6,6 +6,7 @@ import {
   StreamableHTTPClientTransport,
   type CallToolResult,
   type ReadResourceResult,
+  UriTemplate,
   type Transport,
 } from "@modelcontextprotocol/client";
 import {
@@ -21,7 +22,7 @@ import {
   type ServerConfig,
 } from "./config.js";
 import { prepareTool, type CatalogTool } from "./catalog.js";
-import { prepareResource, validResourceUri, type CatalogResource, type DiscoveryKind } from "./resources.js";
+import { prepareResource, prepareResourceTemplate, validTemplateRead, validResourceUri, type TemplateTarget, type CatalogResource, type DiscoveryKind } from "./resources.js";
 import { credentialStore, OAuthProvider } from "./auth.js";
 import { resolveSecrets } from "./secrets.js";
 import {
@@ -33,7 +34,15 @@ import {
   type Diagnostic,
 } from "./diagnostics.js";
 
-interface ServerState {
+interface ResourceMetadataCache {
+  resources?: CatalogResource[];
+  resourceIdentity?: string;
+  resourceListedAt?: number;
+  resourceListing?: Promise<CatalogResource[]>;
+  resourceWarnings?: string[];
+  generation?: number;
+}
+interface ServerState extends ResourceMetadataCache {
   client?: Client;
   transport?: Transport;
   connecting?: Promise<Client>;
@@ -43,11 +52,7 @@ interface ServerState {
   connectionToken?: object;
   catalogGeneration: number;
   resourceGeneration: number;
-  resources?: CatalogResource[];
-  resourceIdentity?: string;
-  resourceListedAt?: number;
-  resourceListing?: Promise<CatalogResource[]>;
-  resourceWarnings?: string[];
+  templateCache?: ResourceMetadataCache;
   catalogDirty?: boolean;
   invalidating?: Promise<void>;
   tools?: CatalogTool[];
@@ -65,6 +70,7 @@ export class ToolContractError extends Error {}
 export interface Discovery {
   tools: CatalogTool[];
   resources: CatalogResource[];
+  templates?: CatalogResource[];
   unavailable: string[];
   diagnostics: Diagnostic[];
   warnings: string[];
@@ -415,41 +421,41 @@ export class McpRuntime {
   }
 
   /** Resource catalog caches are memory-only; bodies are never cataloged or cached. */
-  async resourceCatalog(name: string, signal?: AbortSignal, refresh = false): Promise<CatalogResource[]> {
+  async resourceCatalog(name: string, signal?: AbortSignal, refresh = false, templates = false): Promise<CatalogResource[]> {
     signal?.throwIfAborted();
     this.lifetime.signal.throwIfAborted();
     if (this.closing) throw new Error("MCP session ended.");
     const identity = this.identity(name);
-    const state = this.state(name);
+    const owner = this.state(name);
+    const state = templates ? owner.templateCache ??= {} : owner;
     if (refresh) state.resources = undefined;
-    if (!refresh && state.resources && state.resourceIdentity === identity &&
+    if (!refresh && state.resources && state.generation === owner.resourceGeneration && state.resourceIdentity === identity &&
         Date.now() - (state.resourceListedAt ?? 0) < 300_000) return state.resources;
     if (!state.resourceListing) state.resourceListing = (async () => {
       const deadline = AbortSignal.any([this.lifetime.signal, AbortSignal.timeout(this.definition(name).timeoutMs ?? 15_000)]);
       for (let attempt = 0; attempt < 3; attempt++) {
-        const generation = state.resourceGeneration;
+        const generation = owner.resourceGeneration;
         const client = await waitFor(this.client(name), deadline);
-        const listed = client.getServerCapabilities?.()?.resources
-          ? await client.listResources(undefined, {
-            signal: deadline,
-            timeout: this.definition(name).timeoutMs ?? 15_000,
-            cacheMode: "bypass",
-          }) : { resources: [] };
-        if (listed.resources.length > 10_000 || Buffer.byteLength(JSON.stringify(listed.resources)) > 4 * 1024 * 1024)
+        const options = { signal: deadline, timeout: this.definition(name).timeoutMs ?? 15_000, cacheMode: "bypass" as const };
+        const listed = !client.getServerCapabilities?.()?.resources ? [] : templates
+          ? (await client.listResourceTemplates(undefined, options)).resourceTemplates
+          : (await client.listResources(undefined, options)).resources;
+        if (listed.length > 10_000 || Buffer.byteLength(JSON.stringify(listed)) > 4 * 1024 * 1024)
           throw failure("protocol_error", { server: name, operation: "search" });
         const resources: CatalogResource[] = [];
         const warnings: string[] = [];
         const seen = new Set<string>();
-        for (const resource of listed.resources) {
+        for (const resource of listed) {
           try {
-            const prepared = prepareResource(name, identity, resource);
+            const prepared = (templates ? prepareResourceTemplate : prepareResource)(name, identity, resource);
             if (seen.has(prepared.uri)) throw new Error("Duplicate resource URI.");
             seen.add(prepared.uri);
             resources.push(prepared);
           } catch { warnings.push(`${name}: skipped an invalid or duplicate resource descriptor.`); }
         }
         deadline.throwIfAborted();
-        if (generation !== state.resourceGeneration) continue;
+        if (generation !== owner.resourceGeneration) continue;
+        state.generation = generation;
         state.resources = resources;
         state.resourceIdentity = identity;
         state.resourceListedAt = Date.now();
@@ -459,6 +465,17 @@ export class McpRuntime {
       throw failure("catalog_changed", { server: name, operation: "search" });
     })().finally(() => { state.resourceListing = undefined; });
     return waitFor(state.resourceListing, signal);
+  }
+
+  async expandResourceTemplate(target: TemplateTarget, signal?: AbortSignal): Promise<string> {
+    if (!validTemplateRead(target as unknown as Record<string, unknown>))
+      throw failure("resource_invalid", { server: target.server, operation: "read" });
+    const templates = await this.resourceCatalog(target.server, signal, false, true);
+    if (!templates.some((entry) => entry.uri === target.template))
+      throw failure("resource_not_found", { server: target.server, operation: "read" });
+    const uri = new UriTemplate(target.template).expand(target.arguments);
+    if (!validResourceUri(uri)) throw failure("resource_invalid", { server: target.server, operation: "read" });
+    return uri;
   }
 
   async readResource(name: string, uri: string, signal?: AbortSignal): Promise<ReadResourceResult> {
@@ -503,6 +520,7 @@ export class McpRuntime {
     const result: Discovery = {
       tools: [],
       resources: [],
+      templates: [],
       unavailable: [],
       diagnostics: [],
       warnings: [],
@@ -534,6 +552,11 @@ export class McpRuntime {
             try { result.resources.push(...(await this.resourceCatalog(name, signal))); }
             catch (error) { record(error, "resources"); }
             result.warnings.push(...(this.state(name).resourceWarnings ?? []));
+            if (!connectionFailed) {
+              try { result.templates!.push(...(await this.resourceCatalog(name, signal, false, true))); }
+              catch (error) { record(error, "templates"); }
+              result.warnings.push(...(this.state(name).templateCache?.resourceWarnings ?? []));
+            }
           }
         }
       }),
@@ -596,7 +619,7 @@ export class McpRuntime {
   async disconnect(names: string[]): Promise<void> {
     for (const name of names) {
       const state = this.states.get(name);
-      if (state?.connecting || state?.listing || state?.resourceListing)
+      if (state?.connecting || state?.listing || state?.resourceListing || state?.templateCache?.resourceListing)
         throw failure("busy", { server: name, operation: "auth" });
     }
     await Promise.all(names.map(async (name) => {
@@ -620,7 +643,7 @@ export class McpRuntime {
   async reconnect(name: string): Promise<void> {
     this.definition(name);
     const state = this.state(name);
-    if (state.connecting || state.listing || state.resourceListing)
+    if (state.connecting || state.listing || state.resourceListing || state.templateCache?.resourceListing)
       throw failure("busy", { server: name, operation: "reconnect" });
     await state.client?.autoOpenedSubscription?.close();
     await state.client?.close();
@@ -633,7 +656,7 @@ export class McpRuntime {
       return {
         name,
         state: config.disabled ? "disabled"
-          : state?.connecting || state?.listing || state?.resourceListing ? "connecting"
+          : state?.connecting || state?.listing || state?.resourceListing || state?.templateCache?.resourceListing ? "connecting"
           : state?.error ? "failed"
           : state?.client ? "connected" : "disconnected",
         catalogSize: state?.tools?.length,
@@ -667,6 +690,7 @@ export class McpRuntime {
         await state.connecting?.catch(() => {});
         await state.listing?.catch(() => {});
         await state.resourceListing?.catch(() => {});
+        await state.templateCache?.resourceListing?.catch(() => {});
         await state.invalidating;
       }),
     );

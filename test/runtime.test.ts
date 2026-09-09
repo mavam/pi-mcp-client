@@ -535,7 +535,7 @@ test("multi-server discovery deduplicates targets, bounds concurrency, and prese
   expect(result.unavailable).toHaveLength(1);
   expect(result.diagnostics[0].server).toBe("server1");
   expect(JSON.stringify(result)).not.toContain("private-token");
-  expect(await runtime.discover([])).toEqual({ tools: [], resources: [], unavailable: [], diagnostics: [], warnings: [] });
+  expect(await runtime.discover([])).toEqual({ tools: [], resources: [], templates: [], unavailable: [], diagnostics: [], warnings: [] });
 });
 
 test("shutdown closes a connection that finishes late", async () => {

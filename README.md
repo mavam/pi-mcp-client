@@ -56,7 +56,8 @@ to five candidates by default, or up to 50 with `limit`, across both kinds.
 Tool candidates show an exact activation identifier, a short description,
 required parameter names only, and `[loaded]` if already active. Resource
 candidates show the owning server, title or name, exact URI, description, and
-content type when supplied. Each candidate includes exact next-call arguments.
+content type when supplied. Concrete resources and tools include exact next-call arguments; templates
+include a read-call shape and variable names.
 Search uses local BM25-based ranking of metadata, with names and resource titles
 weighted more strongly than descriptions, and support for prefix matching.
 Resource content isn't fetched or searched during discovery.
@@ -93,8 +94,7 @@ can't read the URI. The server still controls which data it returns.
 
 Tool-returned resource links include an exact `mcp_tools({read: ...})` call. Such
 links can be read directly, without prior discovery or activation; linked
-resources don't have to appear in the catalog. Resource templates aren't listed
-or expanded yet, but a concrete URI produced from a template can be read.
+resources don't have to appear in the catalog.
 
 Reading attaches content as the tool result itself, not as a second message. The
 result identifies the source server and URIs and labels the content as untrusted
@@ -115,6 +115,43 @@ data and may be sensitive. Private spill files can also contain sensitive data.
 server's authorization. `kind: "tools"` filters one search; it isn't an access
 restriction. Disable a server to prevent all access, or exclude `mcp_tools` through
 Pi's tool restrictions. Per-resource permission policies aren't implemented.
+
+### Read parameterized resources
+
+Resource discovery also lists URI templates, such as `schema://tables/{table}`,
+without enumerating every possible table. Templates have a `[template]` label,
+variable names, and a read-call shape whose arguments you fill with known values:
+
+```js
+mcp_tools({ query: "table schema", server: "warehouse", kind: "resources" })
+mcp_tools({
+  read: {
+    server: "warehouse",
+    template: "schema://tables/{table}",
+    arguments: { table: "events" }
+  }
+})
+```
+
+Use either `uri` or `template` plus `arguments` inside `read`, never both. The
+selected server must advertise the exact template. The official SDK expands
+strings or string arrays into a concrete URI, then reads it through that same
+server. Template variables aren't an input schema: no required fields or allowed
+values are inferred. Use values from your request or prior results; Pi should
+ask when a needed value is unknown rather than inventing an identifier.
+
+Template reads use the same compact status row as exact reads:
+
+```text
+mcp read
+ ✔︎ warehouse · schema://tables/events
+```
+
+Expanded output includes the template, supplied arguments, and resource content.
+The same authorization, cancellation, output limits, and snapshot rules apply.
+Template catalogs are memory-only, expire after five minutes, and are invalidated
+with resource metadata. Argument data is limited to 64 KiB and expanded URIs to
+4,096 characters. Argument completions and subscriptions aren't implemented.
 
 ### Result display
 
@@ -645,20 +682,6 @@ private temporary JSON files, with their paths included in the output. Supported
 images pass through within an 8 MiB base64 budget; other binary content is kept in
 the full result file. Temporary result files are not automatically deleted and
 may contain sensitive data.
-
-### v0.1 scope
-
-The first release focused on tools; resource discovery and on-demand reading are
-now supported too. Legacy SSE transport, MCP Apps, resource templates and
-subscriptions, prompt commands, roots, sampling, and elicitation aren't supported.
-See the [post-v0.1 backlog](https://github.com/mavam/pi-mcp-client/blob/main/TODO.md)
-for follow-up work; it is not a release commitment.
-
-## 🧹 Uninstall
-
-```sh
-pi remove npm:pi-mcp-client
-```
 
 ## 📄 License
 

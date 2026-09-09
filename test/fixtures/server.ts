@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/server";
+import { McpServer, ResourceTemplate } from "@modelcontextprotocol/server";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import * as z from "zod/v4";
 
@@ -19,5 +19,8 @@ server.registerTool(
 server.registerResource("analytics_schema", "schema://analytics", {
   description: "Analytics database tables and columns", mimeType: "application/json",
 }, async (uri) => ({ contents: [{ uri: uri.href, mimeType: "application/json", text: '{"tables":["events"]}' }] }));
+server.registerResource("table_schema", new ResourceTemplate("schema://tables/{table}", { list: undefined }), {
+  description: "Schema for a database table", mimeType: "application/json",
+}, async (uri, variables) => ({ contents: [{ uri: uri.href, mimeType: "application/json", text: JSON.stringify({ table: variables.table }) }] }));
 process.stderr.write("Fixture diagnostics must not reach the terminal.\n");
 await server.connect(new StdioServerTransport());

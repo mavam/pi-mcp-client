@@ -10,14 +10,14 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
+import { createMcpHandler, McpServer, ResourceTemplate } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 import extension from "../src/index.js";
 
 // A real Pi loop and real MCP HTTP transport; the model endpoint is local and
 // deterministic, so this test never consumes API credentials or model quota.
-for (const mode of ["anthropic", "openai", "fallback"] as const)
-  test(`Pi ${mode}: discover, read context, activate, then call a native tool`, async () => {
+for (const templateRead of [false, true]) for (const mode of ["anthropic", "openai", "fallback"] as const)
+  test(`Pi ${mode}: discover, read ${templateRead ? "template" : "resource"} context, activate, then call a native tool`, async () => {
     const provider = mode === "openai" ? "openai" : "anthropic";
     const directory = await mkdtemp(join(tmpdir(), "mcp-integration-"));
     let called = 0;
@@ -35,10 +35,13 @@ for (const mode of ["anthropic", "openai", "fallback"] as const)
           return { content: [{ type: "text", text: `echo: ${message}` }] };
         },
       );
-      server.registerResource("echo_guide", "guide://echo", { description: "Echo usage guide", mimeType: "text/plain" }, async (uri) => {
+      const metadata = { description: "Echo usage guide", mimeType: "text/plain" };
+      const readGuide = async (uri: URL) => {
         resourceReads++;
         return { contents: [{ uri: uri.href, text: "Resource body sentinel: echo accepts a message." }] };
-      });
+      };
+      if (templateRead) server.registerResource("echo_guide", new ResourceTemplate("guide://{tool}", { list: undefined }), metadata, readGuide);
+      else server.registerResource("echo_guide", "guide://echo", metadata, readGuide);
       return server;
     });
     const requests: Record<string, any>[] = [];
@@ -51,7 +54,9 @@ for (const mode of ["anthropic", "openai", "fallback"] as const)
         const turn = requests.length;
         const name = turn <= 3 ? "mcp_tools" : "mcp__fixture__echo";
         const args = turn === 1 ? { query: "echo" }
-          : turn === 2 ? { read: { server: "fixture", uri: "guide://echo" } }
+          : turn === 2 ? { read: templateRead
+            ? { server: "fixture", template: "guide://{tool}", arguments: { tool: "echo" } }
+            : { server: "fixture", uri: "guide://echo" } }
           : turn === 3 ? { activate: ["fixture.echo"] } : { message: "hello" };
         if (provider === "openai") {
           const item =
