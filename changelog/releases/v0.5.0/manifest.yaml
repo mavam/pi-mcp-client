@@ -1,0 +1,10 @@
+created: 2026-09-09
+title: Automatic OAuth for HTTP servers
+intro: >-
+  HTTP authentication is now automatic for MCP servers, with stored OAuth tokens reused
+  and challenges handled transparently through the MCP SDK. This release removes legacy
+  OAuth configuration and command switches while keeping explicit login simple and
+  reliable.
+source:
+  mode: sync-stable-queue
+  previous_stable: v0.4.0
