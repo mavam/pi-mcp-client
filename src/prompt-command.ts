@@ -8,12 +8,11 @@ import type { McpRuntime } from "./runtime.js";
 import { promptSelector } from "./prompt-selector.js";
 
 export class PromptCommandError extends Error {}
-export const PROMPT_USAGE = "Use /mcp prompts <server> or /mcp prompt <server> <name> [argument=value ...].";
+export const PROMPT_USAGE = "Use /mcp prompt <server> [name] [argument=value ...].";
 
-export function parsePromptCommand(input: string) {
+export function parsePromptCommand(input: string): { server: string; name: string | undefined; args: Record<string, string> } {
   const [action, server, name, ...words] = commandWords(input);
-  if (!["prompt", "prompts"].includes(action) || !server ||
-      (action === "prompts" ? name !== undefined : !name)) throw new PromptCommandError(PROMPT_USAGE);
+  if (action !== "prompt" || !server) throw new PromptCommandError(PROMPT_USAGE);
   const args: Record<string, string> = Object.create(null);
   for (const word of words) {
     const equals = word.indexOf("=");

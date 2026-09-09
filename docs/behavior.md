@@ -33,7 +33,7 @@ contain sensitive data and aren't automatically deleted.
 ## Prompt snapshots
 
 Prompt discovery fetches metadata only. You explicitly enter arguments and fetch a
-preview through `/mcp prompts` or `/mcp prompt`. Only **Use prompt** adds the
+preview through `/mcp prompt`. Only **Use prompt** adds the
 reviewed snapshot to the conversation and starts a model turn. Cancelling a
 preview adds no message and doesn't write a spill file. Arguments already sent to
 the server can't be recalled.
