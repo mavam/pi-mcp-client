@@ -86,10 +86,10 @@ export function diagnostic(
       "Check server filters and use mcp_tools with activate and the exact identifier to activate the current tool definition. Reload Pi if the connection configuration changed.",
     tool_error:
       "Review the server's tool result and inputs. Verify the outcome before retrying.",
-    oauth_failed: `Check OAuth support, the configured public client ID, and browser access to the local callback, then run /mcp login ${target}.`,
+    oauth_failed: `Check OAuth support, the configured public client ID, and callback access. Retry /mcp login ${target}, or use /mcp login ${target} --no-browser for manual callback handoff.`,
     oauth_issuer_changed: `Verify the server configuration before running /mcp logout ${target} and /mcp login ${target} to trust the new authorization server.`,
-    callback_unavailable: "Free local port 19847, then retry authentication.",
-    busy: "Wait for discovery to finish, then retry.",
+    callback_unavailable: `Free the configured callback port, change oauthCallbackPort, or run /mcp login ${target} --no-browser.`,
+    busy: "Wait for the current MCP operation to finish, then retry.",
     operation_failed:
       "Check /mcp for server status and verify the server configuration.",
   };

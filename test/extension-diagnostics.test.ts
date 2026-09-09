@@ -264,6 +264,76 @@ test("logout reports store failures without claiming success or exposing raw err
   expect(h.notifications.at(-1)).not.toContain("private-keyring-error");
 });
 
+test("manual login validates syntax and refuses non-interactive use before credentials", async () => {
+  let accesses = 0;
+  const h = await host(JSON.stringify({ mcpServers: { example: { url: "https://example.com/mcp", oauth: true } } }), [], async () => {
+    accesses++;
+    throw new Error("unexpected credential access");
+  });
+  for (const input of ["login example --unknown", "login example --no-browser extra", "login example --no-browser --no-browser", "login --no-browser example"]) {
+    await h.command(input);
+    expect(h.notifications.at(-1)).toContain("Usage:");
+  }
+  h.ctx.hasUI = false;
+  await expect(h.command("login example --no-browser")).rejects.toThrow("interactive session");
+  expect(accesses).toBe(0);
+  expect(h.commands.get("mcp").getArgumentCompletions("login example --no"))
+    .toEqual([{ value: "login example --no-browser", label: "--no-browser" }]);
+});
+
+for (const outcome of ["success", "cancel", "shutdown"] as const) {
+  test(`manual login keeps callbacks in dialogs and handles ${outcome}`, async () => {
+    let base = "";
+    let record: string | null = null;
+    let tokenRequests = 0;
+    const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
+      const path = new URL(request.url).pathname;
+      if (path.startsWith("/.well-known/oauth-protected-resource"))
+        return Response.json({ resource: `${base}/mcp`, authorization_servers: [base] });
+      if (path === "/.well-known/oauth-authorization-server")
+        return Response.json({ issuer: base, authorization_endpoint: `${base}/authorize`, token_endpoint: `${base}/token`,
+          response_types_supported: ["code"], token_endpoint_auth_methods_supported: ["none"], code_challenge_methods_supported: ["S256"] });
+      if (path === "/token") {
+        tokenRequests++;
+        return Response.json({ access_token: "private-token", token_type: "Bearer" });
+      }
+      return new Response("Not found", { status: 404 });
+    } });
+    base = `http://127.0.0.1:${server.port}`;
+    cleanup.push(async () => { await server.stop(true); });
+    const h = await host(JSON.stringify({ mcpServers: { example: { url: `${base}/mcp`, oauth: true, oauthClientId: "public", oauthScopes: ["read"], oauthCallbackPort: 19848 } } }), [], async () => ({
+      read: () => record, write: (value) => { record = value; }, remove: () => { record = null; },
+    }));
+    const reconnect = spyOn(McpRuntime.prototype, "reconnect").mockResolvedValue(undefined);
+    cleanup.push(async () => reconnect.mockRestore());
+    let prompts = 0;
+    Object.assign(h.ctx.ui, { input: async (title: string, placeholder: string, options: { signal: AbortSignal }) => {
+      prompts++;
+      expect(title).toContain("Requested scopes: read");
+      expect(placeholder).toBe("Callback URL");
+      if (outcome === "cancel") return undefined;
+      if (outcome === "shutdown") {
+        await h.hooks.get("session_shutdown")({}, h.ctx);
+        expect(options.signal.aborted).toBe(true);
+        return undefined;
+      }
+      const authorization = new URL(title.split("Open this URL in a browser:\n")[1].split("\n")[0]);
+      const callback = new URL(authorization.searchParams.get("redirect_uri")!);
+      callback.searchParams.set("code", "private-code");
+      callback.searchParams.set("state", authorization.searchParams.get("state")!);
+      return callback.href;
+    } });
+    await h.command("login example --no-browser");
+    expect(prompts).toBe(1);
+    expect(tokenRequests).toBe(outcome === "success" ? 1 : 0);
+    expect(reconnect).toHaveBeenCalledTimes(outcome === "success" ? 1 : 0);
+    expect(h.notifications.at(-1)).toContain(outcome === "success" ? "login complete" : "cancelled");
+    const notifications = h.notifications.join("\n");
+    for (const value of ["private-code", "private-token", "/authorize", "state="]) expect(notifications).not.toContain(value);
+    expect(h.activeTools()).toEqual(["mcp_tools"]);
+  });
+}
+
 test("removed command names fail without connecting and login uses the new name", async () => {
   const h = await host(JSON.stringify({ mcpServers: { example: { command: "never-start" } } }));
   const connect = spyOn(McpRuntime.prototype, "reconnect");

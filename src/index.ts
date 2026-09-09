@@ -67,6 +67,7 @@ export default function mcpClient(
   let config: Config = {};
   let configError: DiagnosticError | undefined;
   let sessionGeneration = 0;
+  let loginController: AbortController | undefined;
   const exposure = new Exposure(pi, registerNative);
   const current = () => {
     if (!runtime)
@@ -213,6 +214,7 @@ export default function mcpClient(
   pi.on("session_tree", (_event, ctx) => restore(ctx));
   pi.on("session_shutdown", async () => {
     sessionGeneration++;
+    loginController?.abort();
     const old = runtime;
     runtime = undefined;
     await old?.close();
@@ -402,6 +404,11 @@ export default function mcpClient(
           .map((action) => ({ value: action, label: action }));
       }
       const [, action, partialServer] = match;
+      if (action === "login") {
+        const login = /^(\S+)\s+(\S*)$/u.exec(partialServer);
+        if (login && Object.hasOwn(config, login[1]) && !config[login[1]].disabled && "--no-browser".startsWith(login[2]))
+          return [{ value: `login ${login[1]} --no-browser`, label: "--no-browser" }];
+      }
       if (!serverActions.includes(action) || /\s/.test(partialServer)) return [];
       return Object.keys(config)
         .filter((name) =>
@@ -526,7 +533,7 @@ export default function mcpClient(
         }
         if (
           !server ||
-          extra.length ||
+          (extra.length > 0 && !(action === "login" && extra.length === 1 && extra[0] === "--no-browser")) ||
           !Object.hasOwn(config, server) ||
           config[server].disabled
         )
@@ -571,41 +578,63 @@ export default function mcpClient(
             );
           const { url, clientId } = oauthSettings(config[server], ctx.cwd);
           const open = async (target: string) => {
-            ctx.ui.notify(`Authenticate ${server} in your browser:\n${target}`, "info");
+            // Authorization URLs stay out of notifications and session history.
             const command =
               process.platform === "darwin"
                 ? "open"
                 : process.platform === "win32"
                   ? "explorer.exe"
                   : "xdg-open";
-            await pi.exec(command, [target], { timeout: 5000 }).catch(() => {});
+            const result = await pi.exec(command, [target], { timeout: 5000 }).catch(() => undefined);
+            if (!result || result.code !== 0)
+              throw failure("oauth_failed", { server, operation: "auth" });
           };
-          const store = await storeFactory(url, clientId);
-          if (ctx.mode === "tui") {
-            let authError: unknown;
-            const ok = await ctx.ui.custom<boolean>((tui, theme, _keys, done) => {
-              const loader = new BorderedLoader(
-                tui,
-                theme,
-                `Waiting for ${server} authentication…`,
-              );
-              void authenticate(url, open, loader.signal, store, clientId).then(
-                () => {
-                  loader.dispose();
-                  done(true);
-                },
-                (error) => {
-                  authError = error;
-                  loader.dispose();
-                  done(false);
-                },
-              );
-              return loader;
-            });
-            if (!ok)
-              throw authError ?? failure("cancelled", { server, operation: "auth" });
-          } else await authenticate(url, open, ctx.signal, store, clientId);
-          await current().reconnect(server);
+          if (loginController) throw failure("busy", { server, operation: "auth" });
+          const controller = new AbortController();
+          loginController = controller;
+          const signal = AbortSignal.any([controller.signal, ...(ctx.signal ? [ctx.signal] : [])]);
+          try {
+            const store = await storeFactory(url, clientId);
+            const options = config[server];
+            const summary = `Requested scopes: ${options.oauthScopes?.join(", ") ?? "SDK/server defaults"}\nCallback: http://127.0.0.1:${options.oauthCallbackPort ?? 19847}/callback`;
+            if (extra[0] === "--no-browser") {
+              await authenticate(url, open, signal, store, clientId, {
+                ...options,
+                handoff: (target, deadline) => ctx.ui.input(
+                  `Sign in to ${server}\n${summary}\n\nOpen this URL in a browser:\n${target}\n\nComplete sign-in, then paste the full callback URL from the address bar, even if the browser shows a connection error. Do not paste it into chat.`,
+                  "Callback URL",
+                  { signal: deadline },
+                ),
+              });
+            } else if (ctx.mode === "tui") {
+              let authError: unknown;
+              const ok = await ctx.ui.custom<boolean>((tui, theme, _keys, done) => {
+                const loader = new BorderedLoader(
+                  tui,
+                  theme,
+                  `Signing in to ${server}…\n${summary}\nOpening browser. Esc to cancel.`,
+                );
+                void authenticate(url, open, AbortSignal.any([signal, loader.signal]), store, clientId, options).then(
+                  () => {
+                    loader.dispose();
+                    done(true);
+                  },
+                  (error) => {
+                    authError = error;
+                    loader.dispose();
+                    done(false);
+                  },
+                );
+                return loader;
+              });
+              if (!ok)
+                throw authError ?? failure("cancelled", { server, operation: "auth" });
+            } else await authenticate(url, open, signal, store, clientId, options);
+            if (generation !== sessionGeneration) throw failure("cancelled", { server, operation: "auth" });
+            await current().reconnect(server);
+          } finally {
+            if (loginController === controller) loginController = undefined;
+          }
         } else if (action === "reconnect") await current().reconnect(server);
         else if (action === "refresh") await current().catalog(server, ctx.signal, true);
         else
