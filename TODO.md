@@ -12,10 +12,10 @@ stays redacted, discovery never activates tools, and authentication stays explic
 
 - [x] **Command terminology:** Use `/mcp list`, `/mcp get <server>`, and
   `/mcp login <server>`. The former `inspect` and `auth` names are not aliases.
-- [ ] **Credential lifecycle (next):** Add `/mcp logout <server>` and safe
-  authentication status in `/mcp get`, including disabled servers. Preserve
-  configuration, distinguish local removal from remote revocation, and explain
-  externally managed credentials without changing them.
+- [x] **Credential lifecycle:** `/mcp logout <server>` and safe authentication
+  status in `/mcp get`, including disabled servers. Logout preserves configuration,
+  distinguishes local removal from remote revocation, and explains externally
+  managed credentials without changing them.
 - [ ] **Pre-registered OAuth clients (following):** Support an explicitly configured
   client ID for servers without dynamic registration, preserving issuer binding
   and OS-backed credentials.
@@ -44,9 +44,11 @@ and [Claude Code MCP](https://code.claude.com/docs/en/mcp).
 - [ ] **OAuth interoperability:** Support pre-registered clients and additional
   client-registration mechanisms where supported by the SDK and server. Preserve
   issuer binding and OS-backed credential storage.
-- [ ] **Credential management:** Add logout and credential removal, plus token
-  revocation when supported. Make it clear which account or grant is in use
-  without exposing tokens.
+- [x] **Credential management:** Logout, credential removal, and best-effort token
+  revocation when supported, with safe stored-credential status.
+- [ ] **Account and grant identity:** Show verified account or grant information
+  when supplied by the service, without exposing tokens or inferring identity
+  from unverified token claims.
 
 ## High priority: everyday client management
 

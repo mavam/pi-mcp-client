@@ -481,6 +481,31 @@ export class McpRuntime {
     }
   }
 
+  /** Close related OAuth connections without reconnecting, including disabled servers. */
+  async disconnect(names: string[]): Promise<void> {
+    for (const name of names) {
+      const state = this.states.get(name);
+      if (state?.connecting || state?.listing)
+        throw failure("busy", { server: name, operation: "auth" });
+    }
+    await Promise.all(names.map(async (name) => {
+      const state = this.states.get(name);
+      if (!state) return;
+      state.connectionToken = undefined;
+      state.catalogGeneration++;
+      const identity = state.identity ?? state.connectionIdentity;
+      await state.client?.autoOpenedSubscription?.close().catch(() => {});
+      await state.client?.close().catch(() => {});
+      await state.transport?.close().catch(() => {});
+      await state.invalidating;
+      this.states.delete(name);
+      if (identity) {
+        const path = join(this.cacheDir, `${identity}.json`);
+        await withFileMutationQueue(path, () => rm(path, { force: true })).catch(() => {});
+      }
+    }));
+  }
+
   async reconnect(name: string): Promise<void> {
     this.definition(name);
     const state = this.state(name);
