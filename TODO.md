@@ -39,7 +39,7 @@ and [Claude Code MCP](https://code.claude.com/docs/en/mcp).
   argument completions and explicitly watch resource changes without fetching
   content or replacing attached snapshots. Watches are connection-local and
   never restored automatically.
-- [ ] **Prompts:** Discover and run server-provided prompts with argument entry and
+- [x] **Prompts:** Discover and run server-provided prompts with argument entry and
   explicit user selection. Treat prompt content as untrusted server data.
 - [ ] **Roots:** Advertise explicitly authorized workspace roots and notify servers
   when they change. Roots are scope hints, not a filesystem sandbox.
@@ -47,8 +47,8 @@ and [Claude Code MCP](https://code.claude.com/docs/en/mcp).
   stale catalogs without silently replacing an active tool contract.
 - [x] **Resource catalog notifications:** Invalidate resource metadata without
   fetching content or changing active tools.
-- [ ] **Prompt catalog notifications:** Extend notification handling when prompts
-  are implemented.
+- [x] **Prompt catalog notifications:** Invalidate prompt metadata without fetching
+  content or changing previews and accepted snapshots.
 - [ ] **Additional OAuth interoperability:** Support confidential pre-registered
   clients and client ID metadata documents where supported by the SDK and server.
   Public pre-registered clients are implemented. Preserve issuer binding and

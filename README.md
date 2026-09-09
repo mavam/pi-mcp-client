@@ -2,7 +2,8 @@
 
 Connect Pi to MCP servers. The assistant discovers tools and resources on demand,
 reads resources as context, and calls tools natively through the official
-TypeScript SDK. No bridge process or invocation proxy.
+TypeScript SDK. You can also select, preview, and use server-provided prompts.
+No bridge process or invocation proxy.
 
 ## 🚀 Installation
 
@@ -32,6 +33,7 @@ Use these commands in Pi to manage your connections:
 | --- | --- |
 | `/mcp` | Inspect server status and loaded-tool counts. Idle connections are normal; servers connect on demand. |
 | `/mcp login <server>` | Sign in to an HTTP server. Only this command opens the login browser. |
+| `/mcp prompts <server>` | Browse prompts, enter arguments, and review a preview before using it. |
 | `/mcp reload` | Apply changes after editing your MCP configuration files. |
 
 Only configure servers you trust: local servers and secret commands run with your
@@ -50,8 +52,8 @@ Detailed guides:
   variables, secret commands, tool filters, and timeouts.
 - [Authentication](docs/authentication.md): OAuth setup, pre-registered clients,
   remote login, and logout.
-- [Commands](docs/commands.md): Server management, tool browsing, and resource
-  watches. These are commands **you** run in Pi.
+- [Commands](docs/commands.md): Server management, tool browsing, prompt selection,
+  and resource watches. These are commands **you** run in Pi.
 - [Tool reference](docs/tool-reference.md): Discovery, activation, resource reads,
   and argument completions. This is the **assistant's** interface, not a user API.
 - [Behavior](docs/behavior.md): Sessions, caching, result display, and permissions.

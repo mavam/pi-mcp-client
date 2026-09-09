@@ -1,9 +1,10 @@
 import MiniSearch from "minisearch";
 import { UriTemplate, type Variables } from "@modelcontextprotocol/client";
 import { DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT, line, plain, searchTools, tokens, type CatalogTool } from "./catalog.js";
+import { promptCommand, type CatalogPrompt } from "./prompts.js";
 import { object } from "./config.js";
 
-export type DiscoveryKind = "all" | "tools" | "resources";
+export type DiscoveryKind = "all" | "tools" | "resources" | "prompts";
 export interface ResourceTarget { server: string; uri: string }
 export interface TemplateTarget { server: string; template: string; arguments: Variables }
 
@@ -49,7 +50,8 @@ export interface CatalogResource extends ResourceTarget {
 export type Candidate =
   | (CatalogTool & { kind: "tool"; nextCall: { activate: string[] } })
   | (CatalogResource & { kind: "resource"; nextCall: { read: ResourceTarget } })
-  | (CatalogResource & { kind: "template"; nextCall: { read: TemplateTarget } });
+  | (CatalogResource & { kind: "template"; nextCall: { read: TemplateTarget } })
+  | (CatalogPrompt & { kind: "prompt"; command: string });
 
 /** URIs identify MCP resources; they are never fetched as URLs or opened as files. */
 export function validResourceUri(value: unknown): value is string {
@@ -94,14 +96,15 @@ export function prepareResourceTemplate(server: string, identity: string, value:
 /** One ranked result set and one limit, with executable next steps but no resource bodies. */
 export function searchCapabilities(
   tools: CatalogTool[], resources: CatalogResource[], query: string,
-  server?: string, limit = DEFAULT_SEARCH_LIMIT, templates: CatalogResource[] = [],
+  server?: string, limit = DEFAULT_SEARCH_LIMIT, templates: CatalogResource[] = [], prompts: CatalogPrompt[] = [],
 ): Candidate[] {
   const toolCandidate = (tool: CatalogTool): Candidate => ({
     ...tool, kind: "tool", nextCall: { activate: [`${tool.server}.${tool.name}`] },
   });
-  if (!resources.length && !templates.length) return searchTools(tools, query, server, limit).map(toolCandidate);
+  if (!resources.length && !templates.length && !prompts.length) return searchTools(tools, query, server, limit).map(toolCandidate);
   const candidates: Candidate[] = [
     ...tools.map(toolCandidate),
+    ...prompts.map((prompt): Candidate => ({ ...prompt, kind: "prompt", command: promptCommand(prompt) })),
     ...resources.map((resource): Candidate => ({
       ...resource, kind: "resource", nextCall: { read: { server: resource.server, uri: resource.uri } },
     })),
@@ -112,9 +115,10 @@ export function searchCapabilities(
   const needle = query.trim();
   const cap = Math.max(1, Math.min(limit, MAX_SEARCH_LIMIT));
   const key = (candidate: Candidate) => JSON.stringify([candidate.kind, candidate.server,
-    candidate.kind === "tool" ? candidate.name : candidate.uri]);
-  const exact = candidates.filter((candidate) => candidate.kind !== "tool"
-    ? candidate.uri === needle
+    candidate.kind === "tool" || candidate.kind === "prompt" ? candidate.name : candidate.uri]);
+  const exact = candidates.filter((candidate) => candidate.kind === "prompt"
+    ? [candidate.name, `${candidate.server}.${candidate.name}`].some((name) => name.toLowerCase() === needle.toLowerCase())
+    : candidate.kind !== "tool" ? candidate.uri === needle
     : [candidate.nativeName, `${candidate.server}.${candidate.name}`].some((name) => name.toLowerCase() === needle.toLowerCase()));
   if (exact.length) return exact.sort((a, b) => key(a).localeCompare(key(b))).slice(0, cap);
   if (!tokens(query).length || !candidates.length) return [];

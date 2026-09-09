@@ -7,6 +7,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import extension from "../src/index.js";
 import { restoredTools } from "../src/exposure.js";
 import { prepareTool } from "../src/catalog.js";
+import { preparePrompt } from "../src/prompts.js";
 import { McpRuntime } from "../src/runtime.js";
 import { OAuthProvider, type CredentialStoreFactory } from "../src/auth.js";
 
@@ -23,11 +24,14 @@ async function host(configuration: string, excluded: string[] = [], credentialSt
   const hooks = new Map<string, any>();
   const commands = new Map<string, any>();
   const notifications: string[] = [];
+  const messages: { message: any; options: any }[] = [];
   let active = ["mcp_tools"];
   extension(
     {
       registerTool: (tool: any) => tools.set(tool.name, tool),
       registerCommand: (name: string, command: any) => commands.set(name, command),
+      registerMessageRenderer: () => {},
+      sendMessage: (message: any, options: any) => messages.push({ message, options }),
       on: (name: string, fn: any) => hooks.set(name, fn),
       getActiveTools: () => active,
       getAllTools: () => [...tools.values()],
@@ -44,6 +48,7 @@ async function host(configuration: string, excluded: string[] = [], credentialSt
     mode: "print",
     isProjectTrusted: () => false,
     waitForIdle: async () => {},
+    isIdle: () => true,
     sessionManager: { getBranch: () => [] },
     ui: {
       notify: (text: string) => notifications.push(text),
@@ -67,6 +72,7 @@ async function host(configuration: string, excluded: string[] = [], credentialSt
     commands,
     execute,
     notifications,
+    messages,
     command: (args: string) => commands.get("mcp").handler(args, ctx),
   };
 }
@@ -682,12 +688,12 @@ test("command completion suggests actions first and servers only after an action
   } }));
   const complete = h.commands.get("mcp").getArgumentCompletions;
   expect(complete("")).toEqual(
-    ["list", "status", "reload", "subscriptions", "add", "remove", "enable", "disable", "get", "tools", "login", "logout", "reconnect", "refresh", "subscribe", "unsubscribe"]
+    ["list", "status", "reload", "subscriptions", "add", "remove", "enable", "disable", "get", "tools", "prompts", "prompt", "login", "logout", "reconnect", "refresh", "subscribe", "unsubscribe"]
       .map((value) => ({ value, label: value })),
   );
   expect(complete("to")).toEqual([{ value: "tools", label: "tools" }]);
   expect(complete("tools")).toEqual([{ value: "tools", label: "tools" }]);
-  for (const action of ["tools", "login", "reconnect", "refresh"]) {
+  for (const action of ["tools", "prompts", "prompt", "login", "reconnect", "refresh"]) {
     expect(complete(`${action} `)).toEqual([
       { value: `${action} cloudflare`, label: "cloudflare" },
       { value: `${action} linear`, label: "linear" },
@@ -1078,4 +1084,63 @@ test("user watches leave snapshots and tools untouched and clear on tree navigat
   expect(h.notifications.at(-1)).toBe("No active resource subscriptions.");
   await h.command("unsubscribe example schema://analytics");
   expect(h.notifications.at(-1)).toContain("removed");
+});
+
+test("prompt commands send a labeled snapshot only after explicit confirmation and never activate tools", async () => {
+  const h = await host(JSON.stringify({ mcpServers: { example: fixtureServer } }));
+  const prompt = preparePrompt("example", "id", { name: "explain", arguments: [{ name: "topic", required: true }] });
+  const catalog = spyOn(McpRuntime.prototype, "promptCatalog").mockResolvedValue([prompt]);
+  const get = spyOn(McpRuntime.prototype, "getPrompt").mockResolvedValue({ messages: [
+    { role: "assistant", content: { type: "text", text: "Snapshot sentinel" } },
+  ] });
+  cleanup.push(async () => { catalog.mockRestore(); get.mockRestore(); });
+  h.ctx.ui.select = async (title, options) => {
+    expect(h.messages).toEqual([]);
+    return title.includes("Preview") ? "Use prompt" : options.find((option) => option === "Fetch preview");
+  };
+  await h.command("prompt example explain topic=OAuth");
+  expect(get).toHaveBeenCalledTimes(1);
+  expect(h.messages).toHaveLength(1);
+  expect(h.messages[0]).toMatchObject({ message: { customType: "mcp-prompt", display: true, details: { server: "example", name: "explain", count: 1 } }, options: { triggerTurn: true } });
+  expect(h.messages[0].message.content).toContain("untrusted server data");
+  expect(h.messages[0].message.content).toContain("Snapshot sentinel");
+  expect(h.activeTools()).toEqual(["mcp_tools"]);
+});
+
+test("the assistant discovers prompt metadata but cannot fetch or run prompts", async () => {
+  const h = await host(JSON.stringify({ mcpServers: { example: fixtureServer } }));
+  const catalog = spyOn(McpRuntime.prototype, "promptCatalog").mockResolvedValue([
+    preparePrompt("example", "id", { name: "explain", description: "Explain OAuth" }),
+  ]);
+  const get = spyOn(McpRuntime.prototype, "getPrompt");
+  cleanup.push(async () => { catalog.mockRestore(); get.mockRestore(); });
+  const result = await h.execute("mcp_tools", { query: "explain", server: "example", kind: "prompts" });
+  expect(result.details.candidates[0]).toMatchObject({ kind: "prompt", command: "/mcp prompt example explain" });
+  expect(result.content[0].text).toContain("recommend; do not execute");
+  expect(get).not.toHaveBeenCalled();
+  expect(h.messages).toEqual([]);
+  expect(h.activeTools()).toEqual(["mcp_tools"]);
+  const rejected = await h.execute("mcp_tools", { prompt: { server: "example", name: "explain" } });
+  expect(rejected.details.failed).toBe(true);
+  expect(get).not.toHaveBeenCalled();
+});
+
+test("tree navigation while reviewing a prompt discards the pending selection", async () => {
+  const h = await host(JSON.stringify({ mcpServers: { example: fixtureServer } }));
+  const catalog = spyOn(McpRuntime.prototype, "promptCatalog").mockResolvedValue([
+    preparePrompt("example", "id", { name: "explain" }),
+  ]);
+  const get = spyOn(McpRuntime.prototype, "getPrompt").mockResolvedValue({ messages: [
+    { role: "user", content: { type: "text", text: "Don't attach" } },
+  ] });
+  cleanup.push(async () => { catalog.mockRestore(); get.mockRestore(); });
+  h.ctx.ui.select = async (title) => {
+    if (!title.includes("Preview")) return "Fetch preview";
+    await h.hooks.get("session_tree")({}, h.ctx);
+    return "Use prompt";
+  };
+  await h.command("prompt example explain");
+  expect(get).toHaveBeenCalledTimes(1);
+  expect(h.messages).toEqual([]);
+  expect(h.notifications.at(-1)).toContain("cancelled");
 });
