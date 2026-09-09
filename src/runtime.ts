@@ -25,6 +25,7 @@ import {
 import { prepareTool, type CatalogTool } from "./catalog.js";
 import { prepareResource, prepareResourceTemplate, validTemplateRead, validResourceUri, validCompletion, type CompletionTarget, type TemplateTarget, type CatalogResource, type DiscoveryKind } from "./resources.js";
 import { connectionAuthProvider, credentialStore, type CredentialStoreFactory } from "./auth.js";
+import { preparePrompt, validPromptArguments, type CatalogPrompt } from "./prompts.js";
 import { ResourceSubscriptions } from "./subscriptions.js";
 import { resolveSecrets } from "./secrets.js";
 import {
@@ -54,6 +55,11 @@ interface ServerState extends ResourceMetadataCache {
   connectionToken?: object;
   catalogGeneration: number;
   resourceGeneration: number;
+  promptGeneration: number;
+  prompts?: CatalogPrompt[];
+  promptListedAt?: number;
+  promptIdentity?: string;
+  promptListing?: Promise<CatalogPrompt[]>;
   templateCache?: ResourceMetadataCache;
   subscriptions?: ResourceSubscriptions;
   catalogDirty?: boolean;
@@ -74,6 +80,7 @@ export interface Discovery {
   tools: CatalogTool[];
   resources: CatalogResource[];
   templates?: CatalogResource[];
+  prompts?: CatalogPrompt[];
   unavailable: string[];
   diagnostics: Diagnostic[];
   warnings: string[];
@@ -84,6 +91,7 @@ export type ConnectFactory = (
   signal: AbortSignal,
   onToolsChanged?: () => void,
   onResourcesChanged?: () => void,
+  onPromptsChanged?: () => void,
 ) => Promise<{ client: Client; transport: Transport }>;
 
 export function waitFor<T>(
@@ -115,6 +123,7 @@ export const createSdkConnector = (storeFactory: CredentialStoreFactory = creden
   signal,
   onToolsChanged,
   onResourcesChanged,
+  onPromptsChanged,
 ) => {
   const timeout = config.timeoutMs ?? 15_000;
   const client = new Client(
@@ -125,6 +134,11 @@ export const createSdkConnector = (storeFactory: CredentialStoreFactory = creden
           autoRefresh: false,
           debounceMs: 0,
           onChanged: () => onToolsChanged?.(),
+        },
+        prompts: {
+          autoRefresh: false,
+          debounceMs: 0,
+          onChanged: () => onPromptsChanged?.(),
         },
         resources: {
           autoRefresh: false,
@@ -241,7 +255,7 @@ export class McpRuntime {
   private state(name: string): ServerState {
     let state = this.states.get(name);
     if (!state) {
-      state = { catalogGeneration: 0, resourceGeneration: 0 };
+      state = { catalogGeneration: 0, resourceGeneration: 0, promptGeneration: 0 };
       this.states.set(name, state);
     }
     return state;
@@ -300,6 +314,11 @@ export class McpRuntime {
           state.resources = undefined;
           state.resourceWarnings = undefined;
         },
+        () => {
+          if (this.closing || this.lifetime.signal.aborted || state.connectionToken !== token) return;
+          state.promptGeneration++;
+          state.prompts = undefined;
+        },
       );
       if (this.closing || this.lifetime.signal.aborted) {
         await client.autoOpenedSubscription?.close().catch(() => {});
@@ -319,6 +338,8 @@ export class McpRuntime {
           void subscriptions?.close(false);
           state.resourceGeneration++;
           state.resources = undefined;
+          state.promptGeneration++;
+          state.prompts = undefined;
         }
       };
       return client;
@@ -477,6 +498,61 @@ export class McpRuntime {
     return waitFor(state.resourceListing, signal);
   }
 
+  /** Metadata only, memory-only; SDK pagination and notifications own protocol behavior. */
+  async promptCatalog(name: string, signal?: AbortSignal, refresh = false): Promise<CatalogPrompt[]> {
+    signal?.throwIfAborted();
+    this.lifetime.signal.throwIfAborted();
+    if (this.closing) throw new Error("MCP session ended.");
+    const identity = this.identity(name);
+    const state = this.state(name);
+    if (refresh) { state.promptGeneration++; state.prompts = undefined; }
+    if (state.prompts && state.promptIdentity === identity && Date.now() - (state.promptListedAt ?? 0) < 300_000) return state.prompts;
+    if (!state.promptListing) state.promptListing = (async () => {
+      const deadline = AbortSignal.any([this.lifetime.signal, AbortSignal.timeout(this.definition(name).timeoutMs ?? 15_000)]);
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const generation = state.promptGeneration;
+        const client = await waitFor(this.client(name), deadline);
+        const listed = !client.getServerCapabilities()?.prompts ? [] :
+          (await client.listPrompts(undefined, { signal: deadline, timeout: this.definition(name).timeoutMs ?? 15_000, cacheMode: "bypass" })).prompts;
+        if (listed.length > 10_000 || Buffer.byteLength(JSON.stringify(listed)) > 4 * 1024 * 1024)
+          throw failure("protocol_error", { server: name, operation: "search" });
+        const prompts = listed.map((value) => preparePrompt(name, identity, value));
+        if (new Set(prompts.map((prompt) => prompt.name)).size !== prompts.length)
+          throw failure("protocol_error", { server: name, operation: "search" });
+        deadline.throwIfAborted();
+        if (generation !== state.promptGeneration) continue;
+        state.prompts = prompts;
+        state.promptIdentity = identity;
+        state.promptListedAt = Date.now();
+        return prompts;
+      }
+      throw failure("catalog_changed", { server: name, operation: "search" });
+    })().finally(() => { state.promptListing = undefined; });
+    return waitFor(state.promptListing, signal);
+  }
+
+  /** Explicit command only. No model-facing get operation, cached bodies, or retries. */
+  async getPrompt(name: string, promptName: string, args: Record<string, string>, signal?: AbortSignal) {
+    const config = this.definition(name);
+    const combined = AbortSignal.any([this.lifetime.signal, AbortSignal.timeout(config.timeoutMs ?? 15_000), ...(signal ? [signal] : [])]);
+    try {
+      combined.throwIfAborted();
+      const client = await waitFor(this.client(name), combined);
+      if (!client.getServerCapabilities()?.prompts) throw failure("prompts_unsupported", { server: name, operation: "prompt" });
+      const prompt = (await this.promptCatalog(name, combined)).find((item) => item.name === promptName);
+      if (!prompt) throw failure("prompt_not_found", { server: name, operation: "prompt" });
+      if (!validPromptArguments(prompt, args)) throw failure("prompt_invalid", { server: name, operation: "prompt" });
+      const result = await client.getPrompt({ name: promptName, arguments: args }, { signal: combined, timeout: config.timeoutMs ?? 15_000 });
+      combined.throwIfAborted();
+      this.state(name).error = undefined;
+      return result;
+    } catch (error) {
+      const value = diagnose(error, { server: name, operation: "prompt", oauth: usesOAuth(config), signal: combined });
+      this.state(name).error = value;
+      throw new DiagnosticError(value);
+    }
+  }
+
   async expandResourceTemplate(target: TemplateTarget, signal?: AbortSignal): Promise<string> {
     if (!validTemplateRead(target as unknown as Record<string, unknown>))
       throw failure("resource_invalid", { server: target.server, operation: "read" });
@@ -602,6 +678,7 @@ export class McpRuntime {
       tools: [],
       resources: [],
       templates: [],
+      prompts: [],
       unavailable: [],
       diagnostics: [],
       warnings: [],
@@ -624,12 +701,12 @@ export class McpRuntime {
               result.unavailable.push(`${catalog}: ${formatDiagnostic(value)}`);
             }
           };
-          if (kind !== "resources") {
+          if (kind === "tools" || kind === "all") {
             try { result.tools.push(...(await this.catalog(name, signal))); }
             catch (error) { record(error, "tools"); }
             result.warnings.push(...(this.state(name).warnings ?? []));
           }
-          if (kind !== "tools" && !connectionFailed) {
+          if ((kind === "resources" || kind === "all") && !connectionFailed) {
             try { result.resources.push(...(await this.resourceCatalog(name, signal))); }
             catch (error) { record(error, "resources"); }
             result.warnings.push(...(this.state(name).resourceWarnings ?? []));
@@ -638,6 +715,10 @@ export class McpRuntime {
               catch (error) { record(error, "templates"); }
               result.warnings.push(...(this.state(name).templateCache?.resourceWarnings ?? []));
             }
+          }
+          if ((kind === "prompts" || kind === "all") && !connectionFailed) {
+            try { result.prompts!.push(...(await this.promptCatalog(name, signal))); }
+            catch (error) { record(error, "prompts"); }
           }
         }
       }),
@@ -700,7 +781,7 @@ export class McpRuntime {
   async disconnect(names: string[]): Promise<void> {
     for (const name of names) {
       const state = this.states.get(name);
-      if (state?.connecting || state?.listing || state?.resourceListing || state?.templateCache?.resourceListing)
+      if (state?.connecting || state?.listing || state?.resourceListing || state?.templateCache?.resourceListing || state?.promptListing)
         throw failure("busy", { server: name, operation: "auth" });
     }
     await Promise.all(names.map(async (name) => {
@@ -726,7 +807,7 @@ export class McpRuntime {
   async reconnect(name: string): Promise<void> {
     this.definition(name);
     const state = this.state(name);
-    if (state.connecting || state.listing || state.resourceListing || state.templateCache?.resourceListing)
+    if (state.connecting || state.listing || state.resourceListing || state.templateCache?.resourceListing || state.promptListing)
       throw failure("busy", { server: name, operation: "reconnect" });
     await state.subscriptions?.close();
     state.subscriptions = undefined;
@@ -741,7 +822,7 @@ export class McpRuntime {
       return {
         name,
         state: config.disabled ? "disabled"
-          : state?.connecting || state?.listing || state?.resourceListing || state?.templateCache?.resourceListing ? "connecting"
+          : state?.connecting || state?.listing || state?.resourceListing || state?.templateCache?.resourceListing || state?.promptListing ? "connecting"
           : state?.error ? "failed"
           : state?.client ? "connected" : "disconnected",
         catalogSize: state?.tools?.length,
@@ -775,6 +856,7 @@ export class McpRuntime {
         await state.client?.close().catch(() => {});
         await state.connecting?.catch(() => {});
         await state.listing?.catch(() => {});
+        await state.promptListing?.catch(() => {});
         await state.resourceListing?.catch(() => {});
         await state.templateCache?.resourceListing?.catch(() => {});
         await state.invalidating;

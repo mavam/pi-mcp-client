@@ -73,8 +73,8 @@ test("mixed search ranks metadata with exact selectors, one limit, and exact nex
   expect(searchCapabilities(tools, resources, "analytics", "warehouse").every((c) => c.server === "warehouse")).toBe(true);
   const exact = searchCapabilities(tools, resources, "schema://analytics");
   expect(exact).toHaveLength(2); // Same URI on distinct servers is not one identity.
-  expect(exact[0].nextCall).toEqual({ read: { server: "other", uri: "schema://analytics" } });
-  expect(searchCapabilities(tools, resources, "WAREHOUSE.QUERY")[0].nextCall).toEqual({ activate: ["warehouse.query"] });
+  expect(exact[0]).toMatchObject({ nextCall: { read: { server: "other", uri: "schema://analytics" } } });
+  expect(searchCapabilities(tools, resources, "WAREHOUSE.QUERY")[0]).toMatchObject({ nextCall: { activate: ["warehouse.query"] } });
   expect(searchCapabilities(tools, resources, "notfound")).toEqual([]);
   expect(searchCapabilities(tools, [...resources].reverse(), "analytics")).toEqual(result);
 });
@@ -153,7 +153,7 @@ test("template metadata and argument validation use SDK variable and expansion s
   expect(validTemplateRead({ template: "docs://host{?q}", arguments: { q: {} } })).toBe(false);
   const candidates = searchCapabilities([], [], entry.uri, undefined, 5, [entry]);
   expect(candidates[0].kind).toBe("template");
-  expect(candidates[0].nextCall).toEqual({ read: { server: "s", template: entry.uri, arguments: {} } });
+  expect(candidates[0]).toMatchObject({ nextCall: { read: { server: "s", template: entry.uri, arguments: {} } } });
 });
 
 for (const protocol of ["auto", "legacy"] as const) {

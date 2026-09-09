@@ -8,6 +8,7 @@ test("one flat tool schema supports mixed discovery, activation, and resource re
   extension({
     registerTool: (tool: any) => tools.push(tool),
     registerCommand: () => {},
+    registerMessageRenderer: () => {},
     on: () => {},
   } as unknown as ExtensionAPI);
   expect(tools).toHaveLength(1);
@@ -26,7 +27,7 @@ test("one flat tool schema supports mixed discovery, activation, and resource re
   expect(schema.properties.activate.minItems).toBe(1);
   expect(schema.properties.activate.maxItems).toBe(MAX_SEARCH_LIMIT);
   expect(schema.required ?? []).not.toContain("read");
-  expect(schema.properties.kind.enum).toEqual(["all", "tools", "resources"]);
+  expect(schema.properties.kind.enum).toEqual(["all", "tools", "resources", "prompts"]);
   expect(schema.properties.read.required).toEqual(["server"]);
   expect(schema.properties.read.properties.template.maxLength).toBe(4096);
   expect(schema.properties.read.properties.arguments.maxProperties).toBe(100);

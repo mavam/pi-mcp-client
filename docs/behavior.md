@@ -30,6 +30,27 @@ Resource content and selected metadata, including URIs, become session data and
 may be sensitive. [Private spill files](troubleshooting.md#large-results) can also
 contain sensitive data and aren't automatically deleted.
 
+## Prompt snapshots
+
+Prompt discovery fetches metadata only. You explicitly enter arguments and fetch a
+preview through `/mcp prompts` or `/mcp prompt`. Only **Use prompt** adds the
+reviewed snapshot to the conversation and starts a model turn. Cancelling a
+preview adds no message and doesn't write a spill file. Arguments already sent to
+the server can't be recalled.
+
+The transcript labels accepted snapshots **mcp prompt** with their server, name,
+and message count. Expand the entry to inspect its contents. Server-provided
+`user` and `assistant` roles remain fields in source-labeled data, not fabricated
+conversation history or system instructions. Terminal control sequences are
+removed before previewing and sending text. Selecting a prompt grants no additional
+tool permissions and never activates tools.
+
+Previously accepted snapshots don't change or refetch on catalog notifications,
+resume, or branch navigation. Session replacement, tree navigation, and
+configuration reload invalidate pending selections. The agent must be idle when
+you choose **Use prompt**; another active turn is never silently interrupted.
+Accepted content becomes session data and may contain sensitive information.
+
 ## Discovery and caching
 
 Connections start on demand, never while the extension factory loads. A search
@@ -45,14 +66,22 @@ They contain tool metadata, not configured credentials. Cached tool-only discove
 and activation need no connection; invocation refreshes the live catalog before
 calling the tool.
 
-Resource metadata, including template catalogs, is held only in memory for up to
-five minutes, not written to the tool catalog cache. Mixed discovery therefore
-may connect even when tools are cached on disk. Resource-list notifications,
+Resource metadata, including template catalogs, and prompt metadata are held only
+in memory for up to five minutes, not written to the tool catalog cache. Mixed
+discovery therefore may connect even when tools are cached on disk. Resource-list notifications,
 disconnection, and explicit refresh invalidate resource metadata without reading
 content. Tool and resource catalog failures are reported independently; healthy
 candidates remain available. The SDK handles pagination. Resource catalogs are
 limited to 10,000 entries and 4 MiB of descriptor data; oversized catalogs fail
 rather than silently returning a partial list. Reads bypass the SDK content cache.
+
+Prompt-list notifications invalidate only prompt metadata; they never fetch prompt
+content or change a pending preview. Disconnection and explicit refresh also
+invalidate prompt metadata. Prompt catalog failures don't suppress healthy
+tool or resource candidates. The SDK handles prompt pagination. Prompt catalogs
+share the 10,000-entry and 4 MiB limits and reject invalid or duplicate descriptors
+rather than presenting a partial catalog.
+
 Connections remain open until shutdown or an explicit lifecycle action such as
 reconnection or configuration reload.
 
@@ -98,17 +127,18 @@ Only load configuration you trust. Server executables and secret commands run
 with your user permissions; trusted project configuration can replace global
 connections and settings.
 
-Server metadata and resource content are untrusted data. Discovery never
+Server metadata, resource content, and prompt content are untrusted data. Discovery never
 activates tools. Explicit activation exposes schemas but doesn't approve tool
 side effects or provide per-call confirmation. Use tool filters and Pi permission
 extensions for additional controls. Cancelling a call doesn't guarantee that the
 server rolled back its effects. The extension doesn't retry failed tool
 invocations; verify an interrupted operation's outcome before trying again.
 
-`includeTools` and `excludeTools` apply only to tools, not resources. Keeping
+`includeTools` and `excludeTools` apply only to tools, not resources or prompts. Keeping
 `mcp_tools` available permits resource reads from enabled servers, subject to the
 server's authorization. `kind: "tools"` filters one search; it isn't an access
 restriction. Disable a server to prevent all access, or exclude `mcp_tools` through
 Pi's tool restrictions to prevent discovery and resource operations. Already active
 native tools have their own tool restrictions. Per-resource permission policies
-aren't implemented.
+aren't implemented. Prompt selection uses explicit user commands, not the
+model-facing tool allowlist; disable the server to prevent prompt access.

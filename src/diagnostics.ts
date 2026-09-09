@@ -27,6 +27,10 @@ const messages = {
   tool_error: "The tool reported an error.",
   resource_invalid: "The resource URI is invalid.",
   resource_not_found: "The resource is no longer available or was not found.",
+  prompts_unsupported: "The server does not advertise prompts.",
+  prompt_not_found: "The prompt is no longer available or was not found.",
+  prompt_invalid: "The prompt arguments do not match the advertised arguments or exceed their limits.",
+  prompt_too_large: "The prompt exceeds 2000 lines or 50 KiB and cannot be used. No content was attached.",
   resources_unsupported: "The server does not advertise resource access.",
   completions_unsupported: "The server does not advertise argument completions.",
   completion_invalid: "The resource completion arguments are invalid.",
@@ -54,6 +58,7 @@ export type Operation =
   | "search"
   | "call"
   | "read"
+  | "prompt"
   | "complete"
   | "subscribe"
   | "auth"
@@ -111,6 +116,10 @@ export function diagnostic(
       "Review the server's tool result and inputs. Verify the outcome before retrying.",
     resource_invalid: "Use an exact absolute resource URI from discovery or a tool-returned resource link.",
     resource_not_found: `Refresh with /mcp refresh ${target}, or obtain a new resource link.`,
+    prompts_unsupported: "Select a server with prompt support.",
+    prompt_not_found: "Browse the current prompt catalog and select an exact name.",
+    prompt_invalid: "Review the argument names, required values, and size limits.",
+    prompt_too_large: "Request a smaller prompt from the server.",
     resources_unsupported: "Use this server's tools instead, or select a server with resource support.",
     completions_unsupported: "Supply known template values or ask the user for them.",
     completion_invalid: "Use an advertised resource template and one of its variable names, with a string prefix and optional known string arguments.",

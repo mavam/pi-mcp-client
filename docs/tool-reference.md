@@ -11,7 +11,7 @@ The `mcp_tools` tool supports four mutually exclusive operations:
 
 | Operation | What the assistant can do | What it doesn't do |
 | --- | --- | --- |
-| `query` | Discover tool and resource metadata. | Read content or activate tools. |
+| `query` | Discover tool, resource, and prompt metadata. | Read content or activate tools. |
 | `activate` | Load full schemas for exact tool identifiers. | Invoke tools. |
 | `read` | Fetch one resource as conversation context. | Activate tools or follow links automatically. |
 | `complete` | Request server suggestions for a template variable. | Read resources, activate tools, or select a value. |
@@ -30,8 +30,8 @@ mcp_tools({ query: "database schema", server: "warehouse", limit: 5 })
 mcp_tools({ query: "list teams", server: "linear", kind: "tools" })
 ```
 
-`kind` defaults to `all`, or accepts `tools` and `resources`. Discovery returns up
-to five candidates by default, or up to 50 with `limit`, across both kinds.
+`kind` defaults to `all`, or accepts `tools`, `resources`, and `prompts`. Discovery
+returns up to five candidates by default, or up to 50 with `limit`, across all kinds.
 
 Tool candidates show an exact activation identifier, a short description,
 required parameter names only, and `[loaded]` if already active. Resource
@@ -39,9 +39,19 @@ candidates show the owning server, title or name, exact URI, description, and
 content type when supplied. Concrete resources and tools include exact next-call
 arguments; templates include a read-call shape and variable names.
 
+Prompt candidates show the owning server, name, description, argument metadata,
+and a user-only command such as `/mcp prompt docs explain`. The assistant can
+recommend this command but can't retrieve or run prompts through `mcp_tools`.
+Only you can [select, preview, and use a prompt](commands.md#use-server-prompts).
+
+```js
+// Discover prompt metadata without fetching the prompt content.
+mcp_tools({ query: "explain authentication", server: "docs", kind: "prompts" })
+```
+
 Search uses local BM25-based ranking of metadata, with names and resource titles
 weighted more strongly than descriptions, and support for prefix matching.
-Resource content isn't fetched or searched. See
+Resource and prompt content isn't fetched or searched. See
 [discovery and caching](behavior.md#discovery-and-caching) for connection behavior.
 
 ## Activate and call tools

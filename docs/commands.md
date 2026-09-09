@@ -3,7 +3,7 @@
 [Back to the README](../README.md)
 
 These are commands **you run in Pi**, not tools the assistant calls. Use them to
-manage servers, inspect capabilities, and watch resource changes. The assistant's
+manage servers, inspect capabilities, use prompts, and watch resource changes. The assistant's
 separate interface is documented in the [tool reference](tool-reference.md).
 
 ## Command reference
@@ -15,13 +15,15 @@ separate interface is documented in the [tool reference](tool-reference.md).
 | `/mcp remove --scope <scope> <server>` | Remove a definition from the selected scope, retaining credentials. |
 | `/mcp get <server>` | Inspect status and configuration, including disabled servers. Connection values are hidden. |
 | `/mcp tools <server>` | Browse the server's tools and inspect descriptions without activating tools. |
+| `/mcp prompts <server>` | Browse prompt metadata, then select a prompt and enter arguments. |
+| `/mcp prompt <server> <name> [argument=value ...]` | Open a named prompt with prefilled arguments, then fetch and review a preview. |
 | `/mcp reload` | Apply configuration changes without restarting Pi. |
 | `/mcp enable <server>` | Enable a server in its effective configuration file. |
 | `/mcp disable <server>` | Disable a server, close its connection, and deactivate its tools. |
 | `/mcp login <server> [--no-browser]` | Authenticate an HTTP server without changing its configuration; optionally paste the callback URL in an interactive dialog. |
 | `/mcp logout <server>` | Remove local OAuth credentials and attempt remote revocation, including for disabled servers. |
 | `/mcp reconnect <server>` | Replace a connection and refresh its catalog. |
-| `/mcp refresh <server>` | Refresh tool and resource metadata without reading resources or loading additional tools. |
+| `/mcp refresh <server>` | Refresh tool, resource, and prompt metadata without fetching content or loading additional tools. |
 | `/mcp subscribe <server> <uri>` | Watch changes to one exact resource URI without fetching content. |
 | `/mcp unsubscribe <server> <uri>` | Stop watching one resource. |
 | `/mcp subscriptions` | List active resource watches and their change markers. |
@@ -58,6 +60,40 @@ change, ask the assistant to activate the exact tool again. See
 [tool changes and caching](behavior.md#discovery-and-caching). Failed tool calls
 aren't retried automatically; verify whether an interrupted operation completed
 before trying again.
+
+## Use server prompts
+
+Prompts are server-maintained task instructions that **you** choose to use. For a
+server that provides an `explain` prompt, browse or open it directly:
+
+```text
+/mcp prompts docs
+/mcp prompt docs explain topic="OAuth flows"
+```
+
+1. Select a prompt. Browsing fetches metadata only and doesn't add anything to the
+   conversation.
+2. Select an argument to edit its string value. Required arguments must be supplied;
+   optional arguments can remain omitted. An empty string is distinct from an
+   omitted value. Inline `argument=value` pairs prefill the editor. Quoting follows
+   the configuration commands' rules, without shell or environment expansion.
+3. Choose **Fetch preview** to send the arguments to the selected MCP server.
+   Your conversation and local files aren't automatically shared. Argument values
+   are limited to 4,096 characters each and 64 KiB in total.
+4. Review the source-labeled messages using **Next page** and **Previous page**.
+   Choose **Back** to change arguments, or **Cancel** to discard the preview.
+5. Choose **Use prompt** to send exactly the reviewed snapshot to the model and
+   start a turn. This saves the content in the session. No second fetch occurs.
+
+Text and embedded text resources are supported. Images, audio, binary resources,
+and other unsupported blocks are identified in the preview and prevent use of the
+whole prompt; they aren't silently omitted. Prompts exceeding 2,000 lines or
+50 KiB are refused, not truncated or written to spill files. Links aren't followed.
+
+These commands require an interactive TUI or RPC session. In the TUI, press Escape
+to cancel a pending fetch. Cancelling doesn't undo arguments already sent to the
+server. Using a prompt doesn't activate tools or approve their side effects. See
+[prompt snapshots](behavior.md#prompt-snapshots) for trust and lifecycle behavior.
 
 ## Enable and disable servers
 
