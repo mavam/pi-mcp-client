@@ -69,6 +69,23 @@ async function host(configuration: string, excluded: string[] = []) {
   };
 }
 
+test("removed command names fail without connecting and login uses the new name", async () => {
+  const h = await host(JSON.stringify({ mcpServers: { example: { command: "never-start" } } }));
+  const connect = spyOn(McpRuntime.prototype, "reconnect");
+  try {
+    for (const action of ["auth", "inspect"]) {
+      await h.command(`${action} example`);
+      expect(h.notifications.at(-1)).toContain("Unknown MCP command");
+      expect(h.commands.get("mcp").getArgumentCompletions(action)).toEqual([]);
+    }
+    await h.command("login example");
+    expect(h.notifications.at(-1)).toContain("Enable oauth");
+    expect(connect).not.toHaveBeenCalled();
+  } finally {
+    connect.mockRestore();
+  }
+});
+
 const fixtureServer = {
   command: process.execPath,
   args: [fileURLToPath(new URL("./fixtures/server.ts", import.meta.url))],
@@ -126,7 +143,7 @@ test("activation needs no search, deduplicates aliases, and loads only explicit 
   expect(result.details.failed).toBe(false);
   expect(h.activeTools()).toEqual(["mcp_tools", "unrelated", "mcp__example__echo"]);
   expect([...h.tools.keys()]).toEqual(["mcp_tools", "mcp__example__echo"]);
-  await h.command("inspect untouched");
+  await h.command("get untouched");
   expect(h.notifications.at(-1)).toContain("disconnected");
   const again = await h.execute("mcp_tools", { activate: ["example.echo"] });
   expect(again.details.loaded).toEqual(result.details.loaded);
@@ -214,7 +231,7 @@ for (const interruption of ["cancel", "session change"])
     } finally { discover.mockRestore(); }
   });
 
-test("inspect includes disabled servers and never resolves or exposes connection secrets", async () => {
+test("get includes disabled servers and never resolves or exposes connection secrets", async () => {
   const h = await host(
     JSON.stringify({
       mcpServers: {
@@ -232,19 +249,19 @@ test("inspect includes disabled servers and never resolves or exposes connection
       },
     }),
   );
-  await h.command("inspect private");
+  await h.command("get private");
   const local = h.notifications.at(-1)!;
   expect(local).toContain("disabled");
   expect(local).toContain("Arguments: 1");
   expect(local).not.toContain("secret-");
   expect(local).not.toContain("touch");
-  await h.command("inspect remote");
+  await h.command("get remote");
   const remote = h.notifications.at(-1)!;
   expect(remote).toContain("disconnected");
   expect(remote).toContain("Headers: 1");
   expect(remote).not.toContain("secret-");
-  expect(h.commands.get("mcp").getArgumentCompletions("inspect p")).toEqual([
-    { value: "inspect private", label: "private" },
+  expect(h.commands.get("mcp").getArgumentCompletions("get p")).toEqual([
+    { value: "get private", label: "private" },
   ]);
 });
 
@@ -256,12 +273,12 @@ test("command completion suggests actions first and servers only after an action
   } }));
   const complete = h.commands.get("mcp").getArgumentCompletions;
   expect(complete("")).toEqual(
-    ["list", "status", "reload", "enable", "disable", "inspect", "tools", "auth", "reconnect", "refresh"]
+    ["list", "status", "reload", "enable", "disable", "get", "tools", "login", "reconnect", "refresh"]
       .map((value) => ({ value, label: value })),
   );
   expect(complete("to")).toEqual([{ value: "tools", label: "tools" }]);
   expect(complete("tools")).toEqual([{ value: "tools", label: "tools" }]);
-  for (const action of ["tools", "auth", "reconnect", "refresh"]) {
+  for (const action of ["tools", "login", "reconnect", "refresh"]) {
     expect(complete(`${action} `)).toEqual([
       { value: `${action} cloudflare`, label: "cloudflare" },
       { value: `${action} linear`, label: "linear" },
@@ -269,7 +286,7 @@ test("command completion suggests actions first and servers only after an action
   }
   expect(complete("tools li")).toEqual([{ value: "tools linear", label: "linear" }]);
   expect(complete("  tools   li")).toEqual(complete("tools li"));
-  expect(complete("inspect d")).toEqual([{ value: "inspect disabled", label: "disabled" }]);
+  expect(complete("get d")).toEqual([{ value: "get disabled", label: "disabled" }]);
   for (const input of ["reload ", "list ", "status ", "unknown ", "tools missing", "tools linear "])
     expect(complete(input)).toEqual([]);
   expect(h.activeTools()).toEqual(["mcp_tools"]);
@@ -307,12 +324,12 @@ test("enable and disable persist, reconcile tools, and keep discovery lazy", asy
   expect(complete("disable ")).toEqual([{ value: "disable other", label: "other" }]);
   await h.command("disable example");
   await h.command("reload");
-  await h.command("inspect example");
+  await h.command("get example");
   expect(h.notifications.at(-1)).toContain("disabled");
   await h.command("enable example");
   expect(h.notifications.at(-1)).toContain("enabled in global configuration");
   expect(h.activeTools()).toEqual(["mcp_tools", "unrelated", other]);
-  await h.command("inspect example");
+  await h.command("get example");
   expect(h.notifications.at(-1)).toContain("disconnected");
   const loaded = (await h.execute("mcp_tools", { activate: ["example.echo"] })).details.loaded;
   expect(loaded).toHaveLength(1);
@@ -480,7 +497,7 @@ test("reload recovers from startup errors and respects project trust", async () 
   ).toHaveLength(1);
   h.ctx.isProjectTrusted = () => true;
   await h.command("reload");
-  await h.command("inspect example");
+  await h.command("get example");
   expect(h.notifications.at(-1)).toContain("disabled");
   expect(h.activeTools()).toEqual(["mcp_tools"]);
 });
@@ -523,7 +540,7 @@ test("cancelled reloads do not replace the current configuration", async () => {
   h.ctx.signal = AbortSignal.abort();
   await h.command("reload");
   expect(h.notifications.at(-1)).toContain("cancelled");
-  await h.command("inspect example");
+  await h.command("get example");
   expect(h.notifications.at(-1)).toContain("Server: example");
 });
 

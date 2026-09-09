@@ -375,9 +375,9 @@ export default function mcpClient(
 
   pi.registerCommand("mcp", {
     description:
-      "Manage MCP servers: list, status, reload, enable|disable|inspect|tools|auth|reconnect|refresh <server>",
+      "Manage MCP servers: list, status, reload, enable|disable|get|tools|login|reconnect|refresh <server>",
     getArgumentCompletions(prefix) {
-      const serverActions = ["enable", "disable", "inspect", "tools", "auth", "reconnect", "refresh"];
+      const serverActions = ["enable", "disable", "get", "tools", "login", "reconnect", "refresh"];
       const input = prefix.trimStart();
       const match = /^(\S+)\s+(.*)$/s.exec(input);
       if (!match) {
@@ -390,7 +390,7 @@ export default function mcpClient(
       return Object.keys(config)
         .filter((name) =>
           name.startsWith(partialServer) &&
-          (action === "inspect" || (action === "enable" ? config[name].disabled : !config[name].disabled)),
+          (action === "get" || (action === "enable" ? config[name].disabled : !config[name].disabled)),
         )
         .sort()
         // Pi replaces the complete argument prefix, not just the server token.
@@ -431,7 +431,7 @@ export default function mcpClient(
           return;
         }
         if (
-          action === "inspect" &&
+          action === "get" &&
           server &&
           !extra.length &&
           Object.hasOwn(config, server)
@@ -460,7 +460,7 @@ export default function mcpClient(
           config[server].disabled
         )
           throw new CommandUsageError(
-            "Usage: /mcp list|status|reload or /mcp enable|disable|inspect|tools|auth|reconnect|refresh <server>. Disabled servers accept enable, disable, and inspect.",
+            "Usage: /mcp list|status|reload or /mcp enable|disable|get|tools|login|reconnect|refresh <server>. Disabled servers accept enable, disable, and get.",
           );
         if (action === "tools") {
           if (!ctx.hasUI)
@@ -489,7 +489,7 @@ export default function mcpClient(
             );
           return;
         }
-        if (action === "auth") {
+        if (action === "login") {
           if (!ctx.hasUI)
             throw new CommandUsageError(
               "OAuth requires an interactive session. Use an Authorization header for headless access.",
@@ -539,7 +539,7 @@ export default function mcpClient(
         else if (action === "refresh") await current().catalog(server, ctx.signal, true);
         else
           throw new CommandUsageError(
-            "Unknown MCP command. Use /mcp list|status|reload or /mcp enable|disable|inspect|tools|auth|reconnect|refresh <server>.",
+            "Unknown MCP command. Use /mcp list|status|reload or /mcp enable|disable|get|tools|login|reconnect|refresh <server>.",
           );
         if (ctx.hasUI)
           ctx.ui.notify(
@@ -554,11 +554,11 @@ export default function mcpClient(
                 diagnose(error, {
                   server,
                   operation:
-                    ["reload", "inspect", "enable", "disable"].includes(action)
+                    ["reload", "get", "enable", "disable"].includes(action)
                       ? "configuration"
                       : action === "tools"
                         ? "search"
-                        : action === "auth"
+                        : action === "login"
                           ? "auth"
                           : action === "refresh"
                             ? "refresh"

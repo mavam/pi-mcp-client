@@ -95,12 +95,12 @@ not the displayed link label.
 | Command | Purpose |
 | --- | --- |
 | `/mcp`, `/mcp list`, `/mcp status` | Show a server status matrix with catalog and loaded-tool counts. |
-| `/mcp inspect <server>` | Inspect status and configuration, including disabled servers. Connection values are hidden. |
+| `/mcp get <server>` | Inspect status and configuration, including disabled servers. Connection values are hidden. |
 | `/mcp tools <server>` | Browse the server's tools and inspect descriptions without activating tools. |
 | `/mcp reload` | Apply configuration changes without restarting Pi. |
 | `/mcp enable <server>` | Enable a server in its effective configuration file. |
 | `/mcp disable <server>` | Disable a server, close its connection, and deactivate its tools. |
-| `/mcp auth <server>` | Authenticate an OAuth-enabled HTTP server. |
+| `/mcp login <server>` | Authenticate an OAuth-enabled HTTP server. |
 | `/mcp reconnect <server>` | Replace a connection and refresh its catalog. |
 | `/mcp refresh <server>` | Refresh a server's catalog without loading additional tools. |
 
@@ -261,7 +261,7 @@ search and deactivates its tools. Enabling does not connect, authenticate, or lo
 tools; ask the assistant to discover the capabilities you need. Other running Pi
 sessions pick up the saved change when they reload their MCP configuration.
 
-Use `/mcp inspect <server>` to check the effective transport, protocol, filters,
+Use `/mcp get <server>` to check the effective transport, protocol, filters,
 and connection status without connecting or running secret commands. Connection
 values—including commands, arguments, URLs, headers, and environment variables—
 are hidden because any of them can contain credentials.
@@ -297,7 +297,7 @@ can't receive notifications and still use the 24-hour disk-cache expiry.
 ### OAuth
 
 Set `"oauth": true` under `mcpServers.<server>` in `mcp.json`, without an
-Authorization header in its connection, then run `/mcp auth <server>`. Pi opens the
+Authorization header in its connection, then run `/mcp login <server>`. Pi opens the
 browser only for this explicit command. Automatic discovery never opens a browser.
 
 OAuth tokens and client registrations are stored in the operating system
@@ -343,7 +343,7 @@ Start with `/mcp`. Failures use a consistent code, a short explanation, and a
 recovery hint, for example:
 
 ```text
-linear: [authentication_required] Authentication is required. Run /mcp auth linear.
+linear: [authentication_required] Authentication is required. Run /mcp login linear.
 ```
 
 Search and tool results also carry structured diagnostics in their result details:
@@ -354,7 +354,7 @@ unavailable server is not an empty catalog.
 | Code | What to check |
 | --- | --- |
 | `configuration_invalid` | JSON syntax, supported fields, transport type, and required environment variables. Reload Pi after editing. |
-| `authentication_required` | Run `/mcp auth <server>` for OAuth, or check the Authorization header. |
+| `authentication_required` | Run `/mcp login <server>` for OAuth, or check the Authorization header. |
 | `permission_denied` | Account permissions, OAuth scopes, and service access policy. |
 | `credential_store_unavailable` | Unlock or enable the OS keyring; Linux needs a Secret Service session. |
 | `secret_lookup_failed` | Secret helper installation, login, exit status, nonempty stdout, and output size. |
