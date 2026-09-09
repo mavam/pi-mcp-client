@@ -1,6 +1,6 @@
 import { ConfigMutationError, type ConfigMutation, type ConfigScope, type ServerConfig } from "./config.js";
 
-export const ADD_USAGE = "Usage: /mcp add --scope global|project [--replace] [--transport http|stdio] [--header 'Name: value'] [--env KEY=value] [--oauth] [--oauth-client-id ID] [--oauth-scope SCOPE] [--oauth-callback-port PORT] <server> <url> OR <server> -- <command> [args...]. Put options before the server name.";
+export const ADD_USAGE = "Usage: /mcp add --scope global|project [--replace] [--transport http|stdio] [--header 'Name: value'] [--env KEY=value] [--oauth-client-id ID] [--oauth-scope SCOPE] [--oauth-callback-port PORT] <server> <url> OR <server> -- <command> [args...]. Put options before the server name.";
 export const REMOVE_USAGE = "Usage: /mcp remove --scope global|project <server>. Credentials are retained; log out first if you want to remove them.";
 
 /** Shell-like quoting only: no variable, command, glob, or shell expansion. */
@@ -60,7 +60,8 @@ export function parseConfigCommand(input: string): Extract<ConfigMutation, { act
     if (seen.has(flag) && flag !== "--header" && flag !== "--env" && flag !== "--oauth-scope") fail();
     seen.add(flag);
     if (flag === "--replace" && action === "add") { replace = true; continue; }
-    if (flag === "--oauth" && action === "add") { definition.oauth = true; continue; }
+    if (flag === "--oauth")
+      throw new ConfigMutationError("Remove --oauth; HTTP authentication is automatic.");
     const value = words[index++];
     if (value === undefined || value.startsWith("--")) fail();
     if (flag === "--scope") {
@@ -98,7 +99,7 @@ export function parseConfigCommand(input: string): Extract<ConfigMutation, { act
     if (transport === "http") fail();
     definition.command = words[++index];
     definition.args = words.slice(index + 1);
-    if (!definition.command || definition.oauth || definition.oauthClientId || definition.oauthScopes || definition.oauthCallbackPort || definition.headers) fail();
+    if (!definition.command || definition.oauthClientId || definition.oauthScopes || definition.oauthCallbackPort || definition.headers) fail();
   } else {
     if (transport === "stdio" || index + 1 !== words.length || definition.env) fail();
     definition.url = words[index];
@@ -121,7 +122,7 @@ export function configCommandCompletions(input: string, servers: string[]) {
   const args = /^--scope\s+(global|project)\s+([^\s]*)$/u.exec(rest);
   if (!args) return [];
   const [, scope, partial] = args;
-  const values = action === "remove" ? servers.sort() : ["--replace", "--transport", "--header", "--env", "--oauth", "--oauth-client-id", "--oauth-scope", "--oauth-callback-port"];
+  const values = action === "remove" ? servers.sort() : ["--replace", "--transport", "--header", "--env", "--oauth-client-id", "--oauth-scope", "--oauth-callback-port"];
   return values.filter((value) => value.startsWith(partial)).map((value) => ({
     value: `${action} --scope ${scope} ${value}`, label: value,
   }));

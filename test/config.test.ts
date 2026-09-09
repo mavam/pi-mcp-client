@@ -125,7 +125,7 @@ test("all client options live directly in the server definition", async () => {
   const { agentDir, cwd, put } = await fixture();
   const fields = {
     url: "https://example.com/mcp",
-    oauth: true,
+    oauthClientId: "client",
     disabled: false,
     description: "Docs",
     includeTools: ["get_*"],

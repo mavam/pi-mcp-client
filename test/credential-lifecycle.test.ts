@@ -94,17 +94,17 @@ test("authentication inspection is local, redacted, and distinguishes unavailabl
   const url = "https://status.example/mcp";
   let reads = 0;
   const factory = async (resolved: string) => { expect(resolved).toBe(url); reads++; return store; };
-  expect(await authenticationSummary({ url, oauth: true }, "/", factory)).toContain("no stored tokens");
+  expect(await authenticationSummary({ url }, "/", factory)).toContain("no stored tokens");
   const provider = new OAuthProvider(url, store);
   provider.saveTokens({ access_token: "private-token", token_type: "Bearer" });
-  expect(await authenticationSummary({ url, oauth: true, headers: { "X-Key": "!never-execute" } }, "/", factory))
+  expect(await authenticationSummary({ url, headers: { "X-Key": "!never-execute" } }, "/", factory))
     .toBe("OAuth · stored tokens (validity not checked)");
   store.write("private-malformed-record");
-  expect(await authenticationSummary({ url, oauth: true }, "/", factory)).toBe("OAuth · credential status unavailable");
-  expect(await authenticationSummary({ url, oauth: true }, "/", async () => { throw new Error("private-store-error"); }))
+  expect(await authenticationSummary({ url }, "/", factory)).toBe("OAuth · credential status unavailable");
+  expect(await authenticationSummary({ url }, "/", async () => { throw new Error("private-store-error"); }))
     .toBe("OAuth · credential status unavailable");
   expect(await authenticationSummary({ url, headers: { Authorization: "!never-execute" } }, "/", factory)).toContain("externally managed");
   expect(await authenticationSummary({ command: "never-execute" }, "/", factory)).toContain("Server-managed");
-  expect(await authenticationSummary({ url }, "/", factory)).toBe("None configured");
-  expect(reads).toBe(3);
+  expect(await authenticationSummary({ url }, "/", factory)).toBe("OAuth · credential status unavailable");
+  expect(reads).toBe(4);
 });

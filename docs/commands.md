@@ -18,7 +18,7 @@ separate interface is documented in the [tool reference](tool-reference.md).
 | `/mcp reload` | Apply configuration changes without restarting Pi. |
 | `/mcp enable <server>` | Enable a server in its effective configuration file. |
 | `/mcp disable <server>` | Disable a server, close its connection, and deactivate its tools. |
-| `/mcp login <server> [--no-browser]` | Enable OAuth and authenticate an HTTP server; optionally paste the callback URL in an interactive dialog. |
+| `/mcp login <server> [--no-browser]` | Authenticate an HTTP server without changing its configuration; optionally paste the callback URL in an interactive dialog. |
 | `/mcp logout <server>` | Remove local OAuth credentials and attempt remote revocation, including for disabled servers. |
 | `/mcp reconnect <server>` | Replace a connection and refresh its catalog. |
 | `/mcp refresh <server>` | Refresh tool and resource metadata without reading resources or loading additional tools. |
@@ -101,16 +101,15 @@ Windows paths with backslashes, single quotes preserve the path verbatim.
 | `--replace` | Replace the complete definition in the selected scope, or create an override of a same-named definition in the other scope. Existing fields aren't merged. |
 | `--header 'Name: value'` | Add an HTTP header. Repeat for different header names. |
 | `--env KEY=value` | Add a stdio environment override. Repeat for different variable names. |
-| `--oauth` | Enable OAuth for an HTTP server. |
-| `--oauth-client-id ID` | Use a pre-registered public client. Requires `--oauth`. |
-| `--oauth-scope SCOPE` | Request an OAuth scope. Repeat for additional scopes. Requires `--oauth`. |
-| `--oauth-callback-port PORT` | Set the loopback callback port. Requires `--oauth`. |
+| `--oauth-client-id ID` | Use a pre-registered public client. |
+| `--oauth-scope SCOPE` | Request an OAuth scope. Repeat for additional scopes. |
+| `--oauth-callback-port PORT` | Set the loopback callback port. |
 
 Retain environment references rather than typing tokens:
 
 ```text
 /mcp add --scope global --header 'Authorization: Bearer ${DOCS_TOKEN}' docs https://mcp.example.com/mcp
-/mcp add --scope global --oauth --oauth-client-id '${CLIENT_ID}' service https://mcp.example.com/mcp
+/mcp add --scope global --oauth-client-id '${CLIENT_ID}' service https://mcp.example.com/mcp
 ```
 
 Define referenced environment variables before running the command. Validation

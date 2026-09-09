@@ -18,14 +18,12 @@ filters aren't merged. Untrusted project files are neither read nor changed.
 {
   "mcpServers": {
     "docs": {
-      "type": "http",
       "url": "https://mcp.example.com/mcp",
       "headers": {
         "Authorization": "Bearer ${DOCS_TOKEN}"
       }
     },
     "local": {
-      "type": "stdio",
       "command": "node",
       "args": ["/absolute/path/to/server.js"],
       "env": {
@@ -65,7 +63,6 @@ shell command when the server connects:
 {
   "mcpServers": {
     "example": {
-      "type": "http",
       "url": "https://mcp.example.com/mcp",
       "headers": {
         "Authorization": "!token=$(op read 'op://Private/Example/token') && printf 'Bearer %s' \"$token\""
@@ -107,10 +104,8 @@ server definition:
 {
   "mcpServers": {
     "docs": {
-      "type": "http",
       "url": "https://mcp.example.com/mcp",
       "description": "Search product documentation",
-      "oauth": true,
       "includeTools": ["get_*", "search_*"]
     }
   }
@@ -120,15 +115,18 @@ server definition:
 | Field | Purpose |
 | --- | --- |
 | `description` | Short capability description for the assistant's server directory. |
-| `oauth` | Set to `true` to use OAuth instead of an Authorization header on an HTTP connection. `/mcp login <server>` enables this automatically. |
-| `oauthClientId` | Optional pre-registered public client ID. Requires `oauth: true`; supports `${ENV_VAR}` interpolation, not secret commands. |
-| `oauthScopes` | Optional array of 1–100 unique OAuth scope tokens to request at login. Requires `oauth: true`; omitted scopes use SDK/server defaults. Values are literal, without interpolation. |
-| `oauthCallbackPort` | Optional loopback callback port, from 1 to 65535. Defaults to `19847`. Requires `oauth: true`. |
+| `oauthClientId` | Optional pre-registered public client ID. Supports `${ENV_VAR}` interpolation, not secret commands. |
+| `oauthScopes` | Optional array of 1–100 unique OAuth scope tokens to request at login. Omitted scopes use SDK/server defaults. Values are literal, without interpolation. |
+| `oauthCallbackPort` | Optional loopback callback port, from 1 to 65535. Defaults to `19847`. |
 | `disabled` | Prevent this server from connecting or exposing tools and resources. |
 | `includeTools` | Optional allowlist of original MCP tool names; `*` matches any sequence. An empty list exposes no tools. |
 | `excludeTools` | Denylist applied after `includeTools`. |
 | `timeoutMs` | Request timeout, from 100 to 600000 ms. Defaults: 15 seconds for discovery/HTTP requests, 30 seconds for stdio tool calls. |
 | `protocol` | `auto` (default) for SDK protocol-version negotiation, or `legacy` for an explicit legacy handshake. |
+
+OAuth client IDs, scopes, and callback ports require HTTP without an Authorization
+header. HTTP authentication is automatic; remove the obsolete `oauth` field from
+existing definitions. See [authentication](authentication.md).
 
 Every definition must include a `url` or `command`, even when `disabled` is true.
 These options are specific to Pi MCP Client, not standardized MCP connection

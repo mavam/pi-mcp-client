@@ -239,9 +239,9 @@ test("expanded JSON is width-safe, collapse/partial stay compact, and themes ref
     ).toEqual(["✔︎ fixture.tool"]);
 });
 
-test("older sessions detect JSON without metadata; malformed offsets safely fall back", () => {
+test("missing or invalid display metadata renders plain text", () => {
   const text = '{"a":1}';
-  expect(formatOutput(text, undefined, theme)).toBe('{\n  "a": 1\n}');
+  expect(formatOutput(text, undefined, theme)).toBe(text);
   expect(formatOutput(text, [{ start: -1, end: 10 }], theme)).toBe(text);
 });
 

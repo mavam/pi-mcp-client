@@ -31,7 +31,7 @@ Use these commands in Pi to manage your connections:
 | Command | Purpose |
 | --- | --- |
 | `/mcp` | Inspect server status and loaded-tool counts. Idle connections are normal; servers connect on demand. |
-| `/mcp login <server>` | Sign in to an OAuth-enabled server. Only this command opens the login browser. |
+| `/mcp login <server>` | Sign in to an HTTP server. Only this command opens the login browser. |
 | `/mcp reload` | Apply changes after editing your MCP configuration files. |
 
 Only configure servers you trust: local servers and secret commands run with your

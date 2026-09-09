@@ -13,27 +13,25 @@ function memoryStore(): SecretStore {
   };
 }
 
-test("pre-registered client IDs require explicit HTTP OAuth and never execute commands", () => {
+test("pre-registered client IDs require HTTP OAuth and never execute commands", () => {
   for (const definition of [
-    { url: "https://example.com", oauthClientId: "client" },
-    { url: "https://example.com", oauth: false, oauthClientId: "client" },
-    { command: "fixture", oauth: true, oauthClientId: "client" },
-    ...["", " ", "bad\nclient", 42, {}, "x".repeat(4097)].map((oauthClientId) => ({ url: "https://example.com", oauth: true, oauthClientId })),
-    { url: "https://example.com", oauth: true, oauthClientSecret: "not-supported" },
+    { command: "fixture", oauthClientId: "client" },
+    ...["", " ", "bad\nclient", 42, {}, "x".repeat(4097)].map((oauthClientId) => ({ url: "https://example.com", oauthClientId })),
+    { url: "https://example.com", oauthClientSecret: "not-supported" },
   ]) expect(() => parseConfig({ mcpServers: { example: definition } })).toThrow();
-  const config = parseConfig({ mcpServers: { example: { url: "https://example.com", oauth: true, oauthClientId: "!literal-client-id" } } });
+  const config = parseConfig({ mcpServers: { example: { url: "https://example.com", oauthClientId: "!literal-client-id" } } });
   expect(resolveServer(config.example, "/").oauthClientId).toBe("!literal-client-id");
   process.env.MCP_TEST_CLIENT_ID = "registered-client";
   try {
-    expect(resolveServer({ url: "https://example.com", oauth: true, oauthClientId: "${MCP_TEST_CLIENT_ID}" }, "/").oauthClientId).toBe("registered-client");
+    expect(resolveServer({ url: "https://example.com", oauthClientId: "${MCP_TEST_CLIENT_ID}" }, "/").oauthClientId).toBe("registered-client");
     process.env.MCP_TEST_CLIENT_ID = " ";
-    expect(() => resolveServer({ url: "https://example.com", oauth: true, oauthClientId: "${MCP_TEST_CLIENT_ID}" }, "/")).toThrow();
+    expect(() => resolveServer({ url: "https://example.com", oauthClientId: "${MCP_TEST_CLIENT_ID}" }, "/")).toThrow();
   } finally { delete process.env.MCP_TEST_CLIENT_ID; }
 });
 
-test("credential identities separate configured clients and preserve existing dynamic storage", async () => {
+test("credential identities depend only on server URL and configured client", async () => {
   const url = "https://identity.example/mcp";
-  expect(credentialKey(url)).toBe(fingerprint({ url, redirect: "http://127.0.0.1:19847/callback" }));
+  expect(credentialKey(url)).toBe(fingerprint({ url }));
   expect(new Set([credentialKey(url), credentialKey(url, "one"), credentialKey(url, "two"), credentialKey(`${url}/other`, "one")]).size).toBe(4);
   const one = memoryStore();
   const two = memoryStore();
@@ -45,7 +43,7 @@ test("credential identities separate configured clients and preserve existing dy
   await logout(url, two, undefined, "two");
   expect(provider.tokens()?.access_token).toBe("private-token");
   expect(() => second.tokens()).toThrow("authentication_required");
-  const summary = await authenticationSummary({ url, oauth: true, oauthClientId: "one" }, "/", async (resolved, id) => {
+  const summary = await authenticationSummary({ url, oauthClientId: "one" }, "/", async (resolved, id) => {
     expect(resolved).toBe(url); expect(id).toBe("one"); return one;
   });
   expect(summary).toBe("OAuth (pre-registered public client) · stored tokens (validity not checked)");

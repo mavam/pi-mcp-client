@@ -1,5 +1,5 @@
 import { line, plain, type CatalogTool } from "./catalog.js";
-import { object, resolveServer, type ServerConfig } from "./config.js";
+import { object, resolveServer, usesOAuth, type ServerConfig } from "./config.js";
 import { credentialStore, OAuthProvider, type CredentialStoreFactory } from "./auth.js";
 import type { ServerStatus } from "./runtime.js";
 import { truncateToWidth } from "@earendil-works/pi-tui";
@@ -103,7 +103,7 @@ export function inspectTool(tool: CatalogTool): string {
 
 /** Resolve only the credential identity, never headers or secret commands. */
 export function oauthSettings(config: ServerConfig, cwd: string): { url: string; clientId?: string } {
-  const resolved = resolveServer({ url: config.url, oauth: true, oauthClientId: config.oauthClientId }, cwd);
+  const resolved = resolveServer({ url: config.url, oauthClientId: config.oauthClientId }, cwd);
   return { url: resolved.url!, clientId: resolved.oauthClientId };
 }
 
@@ -112,11 +112,9 @@ export async function authenticationSummary(
   cwd: string,
   storeFactory: CredentialStoreFactory = credentialStore,
 ): Promise<string> {
-  if (!config.oauth) return config.command
+  if (!usesOAuth(config)) return config.command
     ? "Server-managed (stdio)"
-    : Object.keys(config.headers ?? {}).length
-      ? "Headers (externally managed)"
-      : "None configured";
+    : "Headers (externally managed)";
   const method = config.oauthClientId === undefined ? "OAuth" : "OAuth (pre-registered public client)";
   try {
     const { url, clientId } = oauthSettings(config, cwd);
@@ -141,8 +139,8 @@ export function inspectServer(
     `Server: ${name}`,
     `Transport: ${config.command ? "stdio" : "HTTP"}`,
     `Protocol: ${config.protocol ?? "auto"}`,
-    `OAuth: ${config.oauth ? "enabled" : "disabled"}`,
-    ...(config.oauth ? [
+    `OAuth: ${usesOAuth(config) ? "automatic" : "not used"}`,
+    ...(usesOAuth(config) ? [
       `Requested scopes: ${config.oauthScopes?.map(line).join(", ") ?? "SDK/server defaults"}`,
       `OAuth callback: http://127.0.0.1:${config.oauthCallbackPort ?? 19847}/callback`,
     ] : []),

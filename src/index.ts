@@ -8,7 +8,7 @@ import {
 import { Type } from "typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { searchCapabilities, validResourceUri, validTemplateRead, validCompletion, type TemplateTarget } from "./resources.js";
-import { loadConfig, updateServerConfig, ConfigMutationError, resolveServer, allowed, object, type Config, type ConfigMutation } from "./config.js";
+import { usesOAuth, loadConfig, updateServerConfig, ConfigMutationError, resolveServer, allowed, object, type Config, type ConfigMutation } from "./config.js";
 import { parseConfigCommand, configCommandCompletions } from "./config-commands.js";
 import { authenticationSummary, oauthSettings, inspectServer, inspectTool, serverMatrix, toolPickerLabel } from "./management.js";
 import {
@@ -20,7 +20,7 @@ import {
   type CatalogTool,
 } from "./catalog.js";
 import { authenticate, credentialStore, logout, type CredentialStoreFactory } from "./auth.js";
-import { McpRuntime, ToolContractError } from "./runtime.js";
+import { McpRuntime, createSdkConnector, ToolContractError } from "./runtime.js";
 import { Exposure, restoredTools, TOOLS_TOOL } from "./exposure.js";
 import { convertResult, convertResourceResult, textResult, type ClientDetails } from "./output.js";
 import { renderCall, renderResult } from "./render.js";
@@ -123,7 +123,7 @@ export default function mcpClient(
           return errorResult(error, {
             server: tool.server,
             operation: "call",
-            oauth: config[tool.server]?.oauth,
+            oauth: usesOAuth(config[tool.server]),
             signal: ctx.signal?.aborted ? ctx.signal : signal,
           });
         }
@@ -182,6 +182,7 @@ export default function mcpClient(
       nextConfig,
       ctx.cwd,
       join(agentDir, "cache", "pi-mcp-client"),
+      createSdkConnector(storeFactory),
     );
     const active = new Set(pi.getActiveTools());
     const retained = [...exposure.definitions.values()].filter((tool) => {
@@ -213,7 +214,7 @@ export default function mcpClient(
     configError = undefined;
     try {
       config = await loadConfig(agentDir, ctx.cwd, ctx.isProjectTrusted());
-      runtime = new McpRuntime(config, ctx.cwd, join(agentDir, "cache", "pi-mcp-client"));
+      runtime = new McpRuntime(config, ctx.cwd, join(agentDir, "cache", "pi-mcp-client"), createSdkConnector(storeFactory));
       resourceNotifications(runtime, ctx);
     } catch (error) {
       configError = new DiagnosticError(diagnose(error, { operation: "configuration" }));
@@ -466,7 +467,7 @@ export default function mcpClient(
         const result = errorResult(error, {
           server: args.complete?.server ?? args.read?.server ?? args.server,
           operation: hasComplete ? "complete" : hasRead ? "read" : "search",
-          oauth: config[args.complete?.server ?? args.read?.server ?? args.server ?? ""]?.oauth,
+          oauth: usesOAuth(config[args.complete?.server ?? args.read?.server ?? args.server ?? ""]),
           signal: ctx.signal?.aborted ? ctx.signal : signal,
         });
         if (args.read) {
@@ -596,7 +597,7 @@ export default function mcpClient(
           return;
         }
         if (action === "logout" && server && !extra.length && Object.hasOwn(config, server)) {
-          if (!config[server].oauth) {
+          if (!usesOAuth(config[server])) {
             if (ctx.hasUI) ctx.ui.notify(
               `${server}: no managed OAuth credentials. Header and server credentials are externally managed; configuration was not changed.`, "info",
             );
@@ -608,7 +609,7 @@ export default function mcpClient(
             throw new CommandUsageError("The Pi session changed during logout.");
           // Only definitions sharing both URL and client ID share credentials.
           const related = Object.keys(config).filter((name) => {
-            if (!config[name].oauth) return false;
+            if (!usesOAuth(config[name])) return false;
             try {
               const other = oauthSettings(config[name], ctx.cwd);
               return other.url === url && other.clientId === clientId;
@@ -689,6 +690,8 @@ export default function mcpClient(
           if (Object.keys(config[server].headers ?? {}).some((name) => name.toLowerCase() === "authorization"))
             throw new CommandUsageError("This server uses an Authorization header. Remove it from the server definition before using /mcp login, or keep using header authentication.");
           const { url, clientId } = oauthSettings(config[server], ctx.cwd);
+          const options = config[server];
+          const loginRuntime = current();
           const open = async (target: string) => {
             // Authorization URLs stay out of notifications and session history.
             const command =
@@ -706,14 +709,10 @@ export default function mcpClient(
           loginController = controller;
           const signal = AbortSignal.any([controller.signal, ...(ctx.signal ? [ctx.signal] : [])]);
           try {
-            if (!config[server].oauth) {
-              const scope = await reloadConfiguration(ctx, { action: "oauth", server, expected: config[server] });
-              signal.throwIfAborted();
-              if (generation !== sessionGeneration) throw failure("cancelled", { server, operation: "auth" });
-              ctx.ui.notify(`✔︎ ${server}: OAuth enabled in ${scope} configuration. This setting is retained if sign-in fails or is cancelled.`, "info");
-            }
+            signal.throwIfAborted();
             const store = await storeFactory(url, clientId);
-            const options = config[server];
+            if (generation !== sessionGeneration || current() !== loginRuntime)
+              throw failure("cancelled", { server, operation: "auth" });
             const summary = `Requested scopes: ${options.oauthScopes?.join(", ") ?? "SDK/server defaults"}\nCallback: http://127.0.0.1:${options.oauthCallbackPort ?? 19847}/callback`;
             if (extra[0] === "--no-browser") {
               await authenticate(url, open, signal, store, clientId, {
@@ -748,8 +747,8 @@ export default function mcpClient(
               if (!ok)
                 throw authError ?? failure("cancelled", { server, operation: "auth" });
             } else await authenticate(url, open, signal, store, clientId, options);
-            if (generation !== sessionGeneration) throw failure("cancelled", { server, operation: "auth" });
-            await current().reconnect(server);
+            if (generation !== sessionGeneration || current() !== loginRuntime) throw failure("cancelled", { server, operation: "auth" });
+            await loginRuntime.reconnect(server);
           } finally {
             if (loginController === controller) loginController = undefined;
           }
@@ -787,7 +786,7 @@ export default function mcpClient(
                             : action === "refresh"
                               ? "refresh"
                               : "reconnect",
-                  oauth: config[server]?.oauth,
+                  oauth: usesOAuth(config[server]),
                   signal: ctx.signal,
                 }),
               );

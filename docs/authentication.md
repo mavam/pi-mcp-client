@@ -9,18 +9,31 @@ For externally managed bearer tokens, use
 
 ## Sign in with OAuth
 
-Add the HTTP server, then log in. You don't need to specify `--oauth` first:
+Add the HTTP server, then log in:
 
 ```text
 /mcp add --scope global slack https://mcp.slack.com/mcp
 /mcp login slack
 ```
 
-Login enables `"oauth": true` in the effective server definition (the trusted
-project override, if present; otherwise the global definition), applies it, and
-starts the SDK's OAuth discovery and authorization flow. Other settings are
-preserved. The OAuth setting remains enabled if sign-in fails or you cancel, so
-you can retry login. Adding a server still doesn't connect or open a browser.
+Login uses the effective server definition (the trusted project override, if
+present; otherwise the global definition) and starts the SDK's OAuth discovery
+and authorization flow. It doesn't change configuration files. Adding a server
+still doesn't connect or open a browser.
+
+HTTP servers use automatic authentication by default:
+
+- Configured Authorization headers take precedence over OAuth.
+- Otherwise, connections reuse stored OAuth tokens when available. The SDK
+  handles authentication challenges and refreshes existing grants.
+- Without a grant, an authentication challenge asks you to run `/mcp login`.
+  Discovery and tool calls never register a new client or open a browser.
+- A missing or locked keyring doesn't block public servers. If the server
+  requires OAuth, an unavailable keyring is an error; no credentials are stored
+  outside the OS credential store.
+
+The `oauth` configuration field and `--oauth` switch aren't supported. Remove
+these from existing definitions and commands; HTTP authentication is automatic.
 
 If the server uses an Authorization header, login asks you to remove that header
 before switching to OAuth; it never replaces existing header credentials.
@@ -43,6 +56,13 @@ authorization-server issuer. There is no plaintext credential fallback. PKCE
 verifiers and callback state stay in memory. Linux requires a working Secret
 Service/keyring session.
 
+### Upgrade from earlier versions
+
+Credentials now use an identity based only on the server URL and optional client
+ID. Earlier credential-store entries aren't migrated or deleted. Run
+`/mcp login <server>` again after upgrading; revoke old grants at the service if
+needed. Changing scopes or the callback port doesn't select a different store.
+
 ## Use a pre-registered client
 
 For a server without dynamic registration, register a **public/native** client
@@ -54,7 +74,6 @@ method `none`. Then configure its client ID:
   "mcpServers": {
     "example": {
       "url": "https://mcp.example.com/mcp",
-      "oauth": true,
       "oauthClientId": "${EXAMPLE_OAUTH_CLIENT_ID}"
     }
   }
@@ -81,7 +100,6 @@ Configure scopes and a callback port in the server definition:
   "mcpServers": {
     "example": {
       "url": "https://mcp.example.com/mcp",
-      "oauth": true,
       "oauthScopes": ["read", "write"],
       "oauthCallbackPort": 19848
     }
@@ -92,7 +110,7 @@ Configure scopes and a callback port in the server definition:
 Or set them when adding the server:
 
 ```text
-/mcp add --scope global --oauth --oauth-scope read --oauth-scope write --oauth-callback-port 19848 example https://mcp.example.com/mcp
+/mcp add --scope global --oauth-scope read --oauth-scope write --oauth-callback-port 19848 example https://mcp.example.com/mcp
 ```
 
 The callback becomes `http://127.0.0.1:19848/callback`. Pre-registered clients must
@@ -142,7 +160,7 @@ clients requiring a client secret aren't supported yet.
 ## Sign out
 
 Run `/mcp logout <server>` to remove stored tokens and client registrations. Logout
-also closes connections and deactivates tools for configured OAuth servers sharing
+also closes connections and deactivates tools for OAuth servers sharing
 the same URL and configured client ID, since they share credentials. Configuration
 and enabled state stay unchanged. Disabled servers accept logout too. Header and
 server-managed credentials remain untouched.

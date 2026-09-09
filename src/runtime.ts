@@ -16,6 +16,7 @@ import {
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import {
   allowed,
+  usesOAuth,
   fingerprint,
   resolveServer,
   type Config,
@@ -23,7 +24,7 @@ import {
 } from "./config.js";
 import { prepareTool, type CatalogTool } from "./catalog.js";
 import { prepareResource, prepareResourceTemplate, validTemplateRead, validResourceUri, validCompletion, type CompletionTarget, type TemplateTarget, type CatalogResource, type DiscoveryKind } from "./resources.js";
-import { credentialStore, OAuthProvider } from "./auth.js";
+import { connectionAuthProvider, credentialStore, type CredentialStoreFactory } from "./auth.js";
 import { ResourceSubscriptions } from "./subscriptions.js";
 import { resolveSecrets } from "./secrets.js";
 import {
@@ -108,7 +109,7 @@ export function waitFor<T>(
   });
 }
 
-export const connectSdk: ConnectFactory = async (
+export const createSdkConnector = (storeFactory: CredentialStoreFactory = credentialStore): ConnectFactory => async (
   _name,
   config,
   signal,
@@ -147,9 +148,7 @@ export const connectSdk: ConnectFactory = async (
       })
     : new StreamableHTTPClientTransport(new URL(config.url!), {
         requestInit: { headers: config.headers },
-        authProvider: config.oauth
-          ? new OAuthProvider(config.url!, await credentialStore(config.url!, config.oauthClientId), undefined, config.oauthClientId, config)
-          : undefined,
+        authProvider: await connectionAuthProvider(config, storeFactory),
         // Bound HTTP responses (including OAuth), but not established SSE streams.
         // The SDK bounds ordinary MCP requests with their request timeout.
         fetch: async (input, init) => {
@@ -192,6 +191,8 @@ export const connectSdk: ConnectFactory = async (
     throw error;
   }
 };
+
+export const connectSdk = createSdkConnector();
 
 export class McpRuntime {
   private readonly states = new Map<string, ServerState>();
@@ -328,7 +329,7 @@ export class McpRuntime {
           diagnose(error, {
             server: name,
             operation: "connect",
-            oauth: config.oauth,
+            oauth: usesOAuth(config),
             signal: this.lifetime.signal,
           }),
         );
@@ -577,7 +578,7 @@ export class McpRuntime {
       this.state(name).error = undefined;
       return result;
     } catch (error) {
-      const value = diagnose(error, { server: name, operation: "read", oauth: config.oauth, signal: combined });
+      const value = diagnose(error, { server: name, operation: "read", oauth: usesOAuth(config), signal: combined });
       this.state(name).error = value;
       throw new DiagnosticError(value);
     }
@@ -687,7 +688,7 @@ export class McpRuntime {
       const value = diagnose(error, {
         server: tool.server,
         operation: "call",
-        oauth: config.oauth,
+        oauth: usesOAuth(config),
         signal,
       });
       this.state(tool.server).error = value;
@@ -786,7 +787,7 @@ export class McpRuntime {
       : diagnose(error, {
           server: name,
           operation: "search",
-          oauth: this.config[name]?.oauth,
+          oauth: this.config[name] && usesOAuth(this.config[name]),
           signal: this.lifetime.signal,
         });
   }
