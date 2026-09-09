@@ -95,6 +95,8 @@ not the displayed link label.
 | Command | Purpose |
 | --- | --- |
 | `/mcp`, `/mcp list`, `/mcp status` | Show a server status matrix with catalog and loaded-tool counts. |
+| `/mcp add --scope <scope> [options] <server> <url>` | Save an HTTP server without connecting. For stdio, use `<server> -- <command> [args...]`. |
+| `/mcp remove --scope <scope> <server>` | Remove a definition from the selected scope, retaining credentials. |
 | `/mcp get <server>` | Inspect status and configuration, including disabled servers. Connection values are hidden. |
 | `/mcp tools <server>` | Browse the server's tools and inspect descriptions without activating tools. |
 | `/mcp reload` | Apply configuration changes without restarting Pi. |
@@ -277,6 +279,79 @@ with an ellipsis. Select a tool to see a multiline signature and parameter detai
 with each parameter in a separate paragraph. Browsing respects your include and
 exclude filters and doesn't activate tools or add their schemas to the assistant's
 context. This command requires an interactive UI.
+
+### Add and remove servers
+
+Both commands require an explicit `--scope global` or `--scope project`:
+
+- **Global:** `~/.pi/agent/mcp.json`.
+- **Project:** `.mcp.json` in the current trusted project. Untrusted project files
+  are neither read nor changed.
+
+Add an HTTP server by URL, or a stdio server after `--`:
+
+```text
+/mcp add --scope global docs https://docs.mcp.cloudflare.com/mcp
+/mcp add --scope project local -- node "/path with spaces/server.js"
+```
+
+Put options before the server name. `--transport http` or `--transport stdio` is
+optional; the URL form selects HTTP and the `--` form selects stdio. Arguments
+support single and double quotes and backslash escaping, but are never evaluated
+by a shell. Shell syntax such as `$(...)`, pipes, and globs stays literal. For
+Windows paths with backslashes, single quotes preserve the path verbatim.
+
+Additional options:
+
+| Option | Purpose |
+| --- | --- |
+| `--replace` | Replace the complete definition in the selected scope, or create an override of a same-named definition in the other scope. Existing fields are not merged. |
+| `--header 'Name: value'` | Add an HTTP header. Repeat for different header names. |
+| `--env KEY=value` | Add a stdio environment override. Repeat for different variable names. |
+| `--oauth` | Enable OAuth for an HTTP server. |
+| `--oauth-client-id ID` | Use a pre-registered public client. Requires `--oauth`. |
+
+For example, retain an environment reference rather than typing a token:
+
+```text
+/mcp add --scope global --header 'Authorization: Bearer ${DOCS_TOKEN}' docs https://mcp.example.com/mcp
+/mcp add --scope global --oauth --oauth-client-id '${CLIENT_ID}' service https://mcp.example.com/mcp
+```
+
+Define referenced environment variables before running the command. Validation
+checks the resolved configuration, but saves the references, not their values.
+Secret commands in headers or environment overrides are saved without running
+them. Avoid typing literal credentials in command input or project files; use
+[environment references and secret commands](#secret-commands) instead.
+
+Adding never starts a server, opens a browser, or activates tools. Duplicate names
+in global or trusted project configuration are rejected unless you supply
+`--replace`. Project definitions take precedence; writing a global definition does
+not replace a project override. Other server options, such as tool filters, remain
+available by editing the configuration file.
+
+Remove a definition from a specific scope:
+
+```text
+/mcp remove --scope project local
+```
+
+Removal is distinct from disabling and logout: it deletes the selected definition,
+not its OAuth credentials. Run `/mcp logout <server>` first if you also want to
+remove credentials. Removing a project override exposes any same-named global
+definition; the command reports when a definition in the other scope remains.
+Removing a name absent from the selected scope fails without changing either file.
+
+Successful edits apply immediately using the same connection and tool reconciliation
+as `/mcp reload`. Connections close and reopen on demand; tools whose effective
+definition changed or disappeared are deactivated, while unchanged active tools
+remain available. Other Pi sessions pick up saved changes when they reload.
+
+Writes preserve unrelated settings, follow existing file symlinks, and replace
+files atomically. New files are private; existing file permissions are preserved.
+If global and project configuration point to the same file, scoped edits are
+refused until you separate them. Empty configuration files are retained rather
+than deleted.
 
 ### Discovery and caching
 
