@@ -16,5 +16,8 @@ server.registerTool(
     isError: true,
   }),
 );
+server.registerResource("analytics_schema", "schema://analytics", {
+  description: "Analytics database tables and columns", mimeType: "application/json",
+}, async (uri) => ({ contents: [{ uri: uri.href, mimeType: "application/json", text: '{"tables":["events"]}' }] }));
 process.stderr.write("Fixture diagnostics must not reach the terminal.\n");
 await server.connect(new StdioServerTransport());

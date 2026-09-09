@@ -111,7 +111,7 @@ test("bounds formatted output size, lines, and nesting", () => {
     expect(formatBlock(text, {}, theme)).toBe(text);
 });
 
-test("retains block metadata without changing or duplicating model-facing text", async () => {
+test("retains block metadata and adds actionable resource links without duplicating content", async () => {
   const result = await convertResult(
     {
       content: [
@@ -148,7 +148,7 @@ test("retains block metadata without changing or duplicating model-facing text",
   expect(text.type).toBe("text");
   if (text.type !== "text") return;
   expect(text.text).toBe(
-    'Intro 界\x1b[31m\n\n{"a":1}\n\n{"b":2}\n\n{"c":3}\n\nLinked JSON: test:///link\n\n{\n  "d": 4\n}',
+    'Intro 界\x1b[31m\n\n{"a":1}\n\n{"b":2}\n\n{"c":3}\n\nLinked JSON: test:///link\nRead with mcp_tools({"read":{"server":"fixture","uri":"test:///link"}})\n\n{\n  "d": 4\n}',
   );
   const blocks = result.details.displayBlocks!;
   expect(
@@ -161,7 +161,7 @@ test("retains block metadata without changing or duplicating model-facing text",
   expect(blocks[5]?.structured).toBe(true);
   expect(JSON.stringify(blocks)).not.toContain("Intro");
   expect(formatOutput(text.text, blocks, theme)).toBe(
-    'Intro 界\n\n{\n  "a": 1\n}\n\n{"b":2}\n\n{\n  "c": 3\n}\n\nLinked JSON: test:///link\n\n{\n  "d": 4\n}',
+    'Intro 界\n\n{\n  "a": 1\n}\n\n{"b":2}\n\n{\n  "c": 3\n}\n\nLinked JSON: test:///link\nRead with mcp_tools({"read":{"server":"fixture","uri":"test:///link"}})\n\n{\n  "d": 4\n}',
   );
 });
 

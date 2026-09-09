@@ -5,6 +5,7 @@ import {
   Client,
   StreamableHTTPClientTransport,
   type CallToolResult,
+  type ReadResourceResult,
   type Transport,
 } from "@modelcontextprotocol/client";
 import {
@@ -20,6 +21,7 @@ import {
   type ServerConfig,
 } from "./config.js";
 import { prepareTool, type CatalogTool } from "./catalog.js";
+import { prepareResource, validResourceUri, type CatalogResource, type DiscoveryKind } from "./resources.js";
 import { credentialStore, OAuthProvider } from "./auth.js";
 import { resolveSecrets } from "./secrets.js";
 import {
@@ -40,6 +42,12 @@ interface ServerState {
   connectionIdentity?: string;
   connectionToken?: object;
   catalogGeneration: number;
+  resourceGeneration: number;
+  resources?: CatalogResource[];
+  resourceIdentity?: string;
+  resourceListedAt?: number;
+  resourceListing?: Promise<CatalogResource[]>;
+  resourceWarnings?: string[];
   catalogDirty?: boolean;
   invalidating?: Promise<void>;
   tools?: CatalogTool[];
@@ -56,6 +64,7 @@ export interface ServerStatus {
 export class ToolContractError extends Error {}
 export interface Discovery {
   tools: CatalogTool[];
+  resources: CatalogResource[];
   unavailable: string[];
   diagnostics: Diagnostic[];
   warnings: string[];
@@ -65,6 +74,7 @@ export type ConnectFactory = (
   config: ServerConfig,
   signal: AbortSignal,
   onToolsChanged?: () => void,
+  onResourcesChanged?: () => void,
 ) => Promise<{ client: Client; transport: Transport }>;
 
 export function waitFor<T>(
@@ -95,6 +105,7 @@ export const connectSdk: ConnectFactory = async (
   config,
   signal,
   onToolsChanged,
+  onResourcesChanged,
 ) => {
   const timeout = config.timeoutMs ?? 15_000;
   const client = new Client(
@@ -105,6 +116,11 @@ export const connectSdk: ConnectFactory = async (
           autoRefresh: false,
           debounceMs: 0,
           onChanged: () => onToolsChanged?.(),
+        },
+        resources: {
+          autoRefresh: false,
+          debounceMs: 0,
+          onChanged: () => onResourcesChanged?.(),
         },
       },
       versionNegotiation: {
@@ -212,7 +228,7 @@ export class McpRuntime {
   private state(name: string): ServerState {
     let state = this.states.get(name);
     if (!state) {
-      state = { catalogGeneration: 0 };
+      state = { catalogGeneration: 0, resourceGeneration: 0 };
       this.states.set(name, state);
     }
     return state;
@@ -265,6 +281,12 @@ export class McpRuntime {
             ];
           });
         },
+        () => {
+          if (this.closing || this.lifetime.signal.aborted || state.connectionToken !== token) return;
+          state.resourceGeneration++;
+          state.resources = undefined;
+          state.resourceWarnings = undefined;
+        },
       );
       if (this.closing || this.lifetime.signal.aborted) {
         await client.autoOpenedSubscription?.close().catch(() => {});
@@ -279,6 +301,8 @@ export class McpRuntime {
           state.client = undefined;
           state.transport = undefined;
           state.connectionToken = undefined;
+          state.resourceGeneration++;
+          state.resources = undefined;
         }
       };
       return client;
@@ -333,10 +357,12 @@ export class McpRuntime {
             }
           }
           const client = await this.client(name);
-          const listed = await client.listTools(undefined, {
-            signal: this.lifetime.signal,
-            timeout: this.definition(name).timeoutMs ?? 15_000,
-          });
+          const listed = client.getServerCapabilities && !client.getServerCapabilities()?.tools
+            ? { tools: [] }
+            : await client.listTools(undefined, {
+              signal: this.lifetime.signal,
+              timeout: this.definition(name).timeoutMs ?? 15_000,
+            });
           const tools: CatalogTool[] = [];
           const warnings: string[] = [];
           const seen = new Set<string>();
@@ -388,7 +414,79 @@ export class McpRuntime {
     return waitFor(state.listing, signal);
   }
 
-  async discover(server?: string | string[], signal?: AbortSignal): Promise<Discovery> {
+  /** Resource catalog caches are memory-only; bodies are never cataloged or cached. */
+  async resourceCatalog(name: string, signal?: AbortSignal, refresh = false): Promise<CatalogResource[]> {
+    signal?.throwIfAborted();
+    this.lifetime.signal.throwIfAborted();
+    if (this.closing) throw new Error("MCP session ended.");
+    const identity = this.identity(name);
+    const state = this.state(name);
+    if (refresh) state.resources = undefined;
+    if (!refresh && state.resources && state.resourceIdentity === identity &&
+        Date.now() - (state.resourceListedAt ?? 0) < 300_000) return state.resources;
+    if (!state.resourceListing) state.resourceListing = (async () => {
+      const deadline = AbortSignal.any([this.lifetime.signal, AbortSignal.timeout(this.definition(name).timeoutMs ?? 15_000)]);
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const generation = state.resourceGeneration;
+        const client = await waitFor(this.client(name), deadline);
+        const listed = client.getServerCapabilities?.()?.resources
+          ? await client.listResources(undefined, {
+            signal: deadline,
+            timeout: this.definition(name).timeoutMs ?? 15_000,
+            cacheMode: "bypass",
+          }) : { resources: [] };
+        if (listed.resources.length > 10_000 || Buffer.byteLength(JSON.stringify(listed.resources)) > 4 * 1024 * 1024)
+          throw failure("protocol_error", { server: name, operation: "search" });
+        const resources: CatalogResource[] = [];
+        const warnings: string[] = [];
+        const seen = new Set<string>();
+        for (const resource of listed.resources) {
+          try {
+            const prepared = prepareResource(name, identity, resource);
+            if (seen.has(prepared.uri)) throw new Error("Duplicate resource URI.");
+            seen.add(prepared.uri);
+            resources.push(prepared);
+          } catch { warnings.push(`${name}: skipped an invalid or duplicate resource descriptor.`); }
+        }
+        deadline.throwIfAborted();
+        if (generation !== state.resourceGeneration) continue;
+        state.resources = resources;
+        state.resourceIdentity = identity;
+        state.resourceListedAt = Date.now();
+        state.resourceWarnings = [...new Set(warnings)];
+        return resources;
+      }
+      throw failure("catalog_changed", { server: name, operation: "search" });
+    })().finally(() => { state.resourceListing = undefined; });
+    return waitFor(state.resourceListing, signal);
+  }
+
+  async readResource(name: string, uri: string, signal?: AbortSignal): Promise<ReadResourceResult> {
+    signal?.throwIfAborted();
+    const config = Object.hasOwn(this.config, name) ? this.config[name] : undefined;
+    if (!config || config.disabled) throw failure(config ? "server_disabled" : "server_unknown", { server: name, operation: "read" });
+    if (!validResourceUri(uri)) throw failure("resource_invalid", { server: name, operation: "read" });
+    const combined = AbortSignal.any([this.lifetime.signal, ...(signal ? [signal] : [])]);
+    try {
+      const client = await waitFor(this.client(name), combined);
+      if (!client.getServerCapabilities()?.resources)
+        throw failure("resources_unsupported", { server: name, operation: "read" });
+      // Exact URI, including unlisted tool-returned links. No local/HTTP fallback,
+      // recursive reads, content cache, or automatic retry.
+      const result = await client.readResource({ uri }, {
+        signal: combined, timeout: config.timeoutMs ?? 15_000, cacheMode: "bypass",
+      });
+      combined.throwIfAborted();
+      this.state(name).error = undefined;
+      return result;
+    } catch (error) {
+      const value = diagnose(error, { server: name, operation: "read", oauth: config.oauth, signal: combined });
+      this.state(name).error = value;
+      throw new DiagnosticError(value);
+    }
+  }
+
+  async discover(server?: string | string[], signal?: AbortSignal, kind: DiscoveryKind = "tools"): Promise<Discovery> {
     if (typeof server === "string") {
       const config = Object.hasOwn(this.config, server) ? this.config[server] : undefined;
       if (!config || config.disabled)
@@ -404,6 +502,7 @@ export class McpRuntime {
           .sort();
     const result: Discovery = {
       tools: [],
+      resources: [],
       unavailable: [],
       diagnostics: [],
       warnings: [],
@@ -415,15 +514,27 @@ export class McpRuntime {
         while (index < names.length) {
           signal?.throwIfAborted();
           const name = names[index++];
-          try {
-            result.tools.push(...(await this.catalog(name, signal)));
-          } catch (error) {
+          let connectionFailed = false;
+          const record = (error: unknown, catalog: string) => {
             signal?.throwIfAborted();
-            this.state(name).error = this.failure(name, error);
-            result.diagnostics.push(this.state(name).error!);
-            result.unavailable.push(formatDiagnostic(this.state(name).error!));
+            const value = this.failure(name, error);
+            this.state(name).error = value;
+            connectionFailed ||= value.operation === "connect";
+            if (!result.diagnostics.some((other) => other.server === name && other.code === value.code)) {
+              result.diagnostics.push(value);
+              result.unavailable.push(`${catalog}: ${formatDiagnostic(value)}`);
+            }
+          };
+          if (kind !== "resources") {
+            try { result.tools.push(...(await this.catalog(name, signal))); }
+            catch (error) { record(error, "tools"); }
+            result.warnings.push(...(this.state(name).warnings ?? []));
           }
-          result.warnings.push(...(this.state(name).warnings ?? []));
+          if (kind !== "tools" && !connectionFailed) {
+            try { result.resources.push(...(await this.resourceCatalog(name, signal))); }
+            catch (error) { record(error, "resources"); }
+            result.warnings.push(...(this.state(name).resourceWarnings ?? []));
+          }
         }
       }),
     );
@@ -485,7 +596,7 @@ export class McpRuntime {
   async disconnect(names: string[]): Promise<void> {
     for (const name of names) {
       const state = this.states.get(name);
-      if (state?.connecting || state?.listing)
+      if (state?.connecting || state?.listing || state?.resourceListing)
         throw failure("busy", { server: name, operation: "auth" });
     }
     await Promise.all(names.map(async (name) => {
@@ -509,7 +620,7 @@ export class McpRuntime {
   async reconnect(name: string): Promise<void> {
     this.definition(name);
     const state = this.state(name);
-    if (state.connecting || state.listing)
+    if (state.connecting || state.listing || state.resourceListing)
       throw failure("busy", { server: name, operation: "reconnect" });
     await state.client?.autoOpenedSubscription?.close();
     await state.client?.close();
@@ -522,7 +633,7 @@ export class McpRuntime {
       return {
         name,
         state: config.disabled ? "disabled"
-          : state?.connecting || state?.listing ? "connecting"
+          : state?.connecting || state?.listing || state?.resourceListing ? "connecting"
           : state?.error ? "failed"
           : state?.client ? "connected" : "disconnected",
         catalogSize: state?.tools?.length,
@@ -555,6 +666,7 @@ export class McpRuntime {
         await state.client?.close().catch(() => {});
         await state.connecting?.catch(() => {});
         await state.listing?.catch(() => {});
+        await state.resourceListing?.catch(() => {});
         await state.invalidating;
       }),
     );

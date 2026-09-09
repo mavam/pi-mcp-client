@@ -124,7 +124,7 @@ const STOP = new Set([
 export const DEFAULT_SEARCH_LIMIT = 5;
 export const MAX_SEARCH_LIMIT = 50;
 
-function tokens(text: string): string[] {
+export function tokens(text: string): string[] {
   return text
     .replace(/([a-z])([A-Z])/g, "$1 $2")
     .toLowerCase()

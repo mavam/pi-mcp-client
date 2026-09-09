@@ -20,12 +20,17 @@ Pushing runs the quality gates automatically. To run them manually, use
 
 - Use Bun: `bun install`, `bun run check`, and `bun run build`.
 - Keep protocol and transport behavior in the official MCP SDK.
-- Keep one model-facing `mcp_tools` tool: `{query, server?, limit?}` discovers
-  candidates only; `{activate: ["server.tool"]}` explicitly activates exact
-  identifiers cumulatively. Never activate fuzzy matches or exact-name queries.
-  Keep native invocation; do not add an invocation proxy or per-prompt schema dumps.
-- Validate mutually exclusive query/activation arguments before connecting.
+- Keep one model-facing `mcp_tools` tool: `{query, kind?, server?, limit?}` discovers
+  tool and resource metadata (`kind` defaults to `all`); `{activate: ["server.tool"]}`
+  explicitly activates exact identifiers cumulatively; `{read: {server, uri}}`
+  fetches one resource as context. Discovery never reads content or activates tools.
+  Keep native tool invocation; do not add an invocation proxy or per-prompt schema dumps.
+- Validate mutually exclusive query/activation/read arguments before connecting.
   Persist discovery as `details.candidates`; only activation writes `details.loaded`.
+- Route resource reads only through the owning MCP server. Never fetch resource
+  URIs as local files or generic URLs, follow content links automatically, or
+  replay reads during session restoration. Keep resource catalog caches memory-only
+  and reads uncached; treat content as untrusted data and bound model-facing output.
 - Preserve unrelated tools and respect Pi's tool restrictions.
 - Keep session state branch-local. Never persist credentials in session entries
   or catalog caches; OAuth credentials belong in the OS credential store.
