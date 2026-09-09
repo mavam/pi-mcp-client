@@ -377,6 +377,41 @@ test("notifications racing a queued cache write cannot persist stale tools", asy
   expect(JSON.parse(await readFile(path, "utf8"))).toEqual([]);
 });
 
+for (const protocol of ["auto", "legacy"] as const) {
+  test(`startup and tool overrides do not inherit the shorter HTTP response timeout (${protocol})`, async () => {
+    const f = await fixture();
+    let first = true;
+    let calls = 0;
+    const mcp = createMcpHandler(() => {
+      const server = new McpServer({ name: "timeouts", version: "1" });
+      server.registerTool("slow", {}, async () => {
+        calls++;
+        await Bun.sleep(200);
+        return { content: [{ type: "text", text: "done" }] };
+      });
+      return server;
+    });
+    const http = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(req) {
+      if (first) { first = false; await Bun.sleep(200); }
+      return mcp.fetch(req);
+    } });
+    cleanup.push(async () => { await http.stop(true); });
+    cleanup.push(() => mcp.close());
+    const definition = { url: `http://127.0.0.1:${http.port}/mcp`, headers: { Authorization: "fixture" }, protocol,
+      timeoutMs: 100, startupTimeoutMs: 1000, toolTimeoutMs: 1000 };
+    const runtime = new McpRuntime({ example: definition }, f.directory, join(f.directory, "override-cache"));
+    cleanup.push(() => runtime.close());
+    const [tool] = await runtime.catalog("example");
+    expect((await runtime.call(tool, {})).content).toEqual([{ type: "text", text: "done" }]);
+    expect(calls).toBe(1);
+    const short = new McpRuntime({ example: { ...definition, timeoutMs: 1000, toolTimeoutMs: 100 } }, f.directory, join(f.directory, "short-cache"));
+    cleanup.push(() => short.close());
+    const [shortTool] = await short.catalog("example");
+    await expect(short.call(shortTool, {})).rejects.toThrow("timed out");
+    expect(calls).toBe(2); // No automatic replay after a timeout.
+  });
+}
+
 test("HTTP subscriptions outlive request deadlines and close cleanly", async () => {
   const mcp = createMcpHandler(() => {
     const server = new McpServer({ name: "subscription", version: "1" });

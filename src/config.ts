@@ -14,6 +14,8 @@ export interface ClientOptions {
   includeTools?: string[];
   excludeTools?: string[];
   timeoutMs?: number;
+  startupTimeoutMs?: number;
+  toolTimeoutMs?: number;
   protocol?: "legacy" | "auto";
 }
 
@@ -41,6 +43,8 @@ const OPTION_FIELDS = [
   "includeTools",
   "excludeTools",
   "timeoutMs",
+  "startupTimeoutMs",
+  "toolTimeoutMs",
   "protocol",
 ] as const;
 
@@ -78,13 +82,11 @@ function validateOptions(
         Number(entry.oauthCallbackPort) < 1 || Number(entry.oauthCallbackPort) > 65535))
     fail("oauthCallbackPort (requires OAuth and a port from 1–65535)");
   if (entry.disabled !== undefined && typeof entry.disabled !== "boolean") fail("disabled");
-  if (
-    entry.timeoutMs !== undefined &&
-    (!Number.isInteger(entry.timeoutMs) ||
-      Number(entry.timeoutMs) < 100 ||
-      Number(entry.timeoutMs) > 600_000)
-  )
-    fail("timeoutMs (100–600000)");
+  for (const field of ["timeoutMs", "startupTimeoutMs", "toolTimeoutMs"]) {
+    if (entry[field] !== undefined &&
+        (!Number.isInteger(entry[field]) || Number(entry[field]) < 100 || Number(entry[field]) > 600_000))
+      fail(`${field} (100–600000)`);
+  }
   if (
     entry.protocol !== undefined &&
     entry.protocol !== "legacy" &&
@@ -196,7 +198,8 @@ export type ConfigScope = "global" | "project";
 export type ConfigMutation =
   | { action: "toggle"; server: string; disabled: boolean }
   | { action: "add"; server: string; scope: ConfigScope; definition: ServerConfig; replace: boolean }
-  | { action: "remove"; server: string; scope: ConfigScope };
+  | { action: "remove"; server: string; scope: ConfigScope }
+  | { action: "import"; scope: ConfigScope; servers: Config; expected: string; sourcePath: string };
 
 /** Messages from this class are safe to show without including raw configuration. */
 export class ConfigMutationError extends Error {}
@@ -215,6 +218,23 @@ async function configTarget(path: string): Promise<string> {
   }
 }
 
+/** Read both authorized scopes for an import preview; never resolve connection values. */
+export async function inspectConfigScopes(agentDir: string, cwd: string, trusted: boolean) {
+  const paths = [join(agentDir, "mcp.json"), ...(trusted ? [join(cwd, ".mcp.json")] : [])];
+  const targets = await Promise.all(paths.map(configTarget));
+  if (targets.length === 2 && targets[0] === targets[1])
+    throw new ConfigMutationError("Global and project configuration share a file; separate them before scoped edits.");
+  const documents = await Promise.all(targets.map(readJson));
+  const parsed = documents.map((document, index) => document === undefined
+    ? Object.create(null) as Config : parseConfig(document, paths[index]));
+  return {
+    global: parsed[0],
+    project: parsed[1] ?? Object.create(null) as Config,
+    targets: { global: targets[0], project: targets[1] },
+    expected: fingerprint({ targets, documents: documents.map((document) => document ?? null) }),
+  };
+}
+
 /** Scoped, atomic updates; validation and read/modify/write share Pi's mutation queue. */
 export async function updateServerConfig(
   agentDir: string,
@@ -223,7 +243,7 @@ export async function updateServerConfig(
   mutation: ConfigMutation,
   validate: (config: Config) => void,
 ): Promise<{ config: Config; scope: ConfigScope }> {
-  const scoped = mutation.action === "add" || mutation.action === "remove";
+  const scoped = mutation.action !== "toggle";
   if (scoped && mutation.scope === "project" && !trusted)
     throw new ConfigMutationError("Project configuration requires a trusted project. Use global scope or trust the project first.");
   const paths = [join(agentDir, "mcp.json"), ...(trusted ? [join(cwd, ".mcp.json")] : [])];
@@ -237,7 +257,10 @@ export async function updateServerConfig(
     const documents = await Promise.all(targets.map(readJson));
     const parsed = documents.map((document, index) => document === undefined
       ? Object.create(null) as Config : parseConfig(document, paths[index]));
-    const { server } = mutation;
+    if (mutation.action === "import" && mutation.expected !== fingerprint({
+      targets, documents: documents.map((document) => document ?? null),
+    })) throw new ConfigMutationError("MCP configuration changed since the preview. Run /mcp import again; nothing was saved.");
+    const server = mutation.action === "import" ? "" : mutation.server;
     let source = scoped ? mutation.scope === "global" ? 0 : 1 : -1;
     if (!scoped) {
       for (const [index, config] of parsed.entries()) if (Object.hasOwn(config, server)) source = index;
@@ -245,7 +268,17 @@ export async function updateServerConfig(
     }
     const document = (documents[source] ?? { mcpServers: {} }) as { mcpServers: Record<string, ServerConfig> };
     let changed = true;
-    if (mutation.action === "add") {
+    if (mutation.action === "import") {
+      if (targets[source] === mutation.sourcePath)
+        throw new ConfigMutationError("Import source and destination are the same file. Choose a different destination scope or source file.");
+      const imported = parseConfig({ mcpServers: mutation.servers });
+      if (!Object.keys(imported).length) throw new ConfigMutationError("No servers selected for import.");
+      for (const [name, definition] of Object.entries(imported)) {
+        // Check every imported definition, including disabled and shadowed entries.
+        resolveServer(definition, cwd);
+        document.mcpServers[name] = structuredClone(definition);
+      }
+    } else if (mutation.action === "add") {
       // Validate even a new definition shadowed by another scope. Never resolve secrets by executing them.
       const definition = parseConfig({ mcpServers: { [server]: mutation.definition } })[server];
       resolveServer(definition, cwd);

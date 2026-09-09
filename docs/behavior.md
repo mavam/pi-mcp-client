@@ -127,6 +127,12 @@ Only load configuration you trust. Server executables and secret commands run
 with your user permissions; trusted project configuration can replace global
 connections and settings.
 
+Configuration imports require an explicit file, scope, selection, and final
+confirmation. Import previews hide connection values; review the source file
+before trusting it. Inline credentials are copied only with the selected whole
+server definitions. Importing doesn't run or authenticate servers, but enabled
+imports can execute programs or send credentials when used afterward.
+
 Server metadata, resource content, and prompt content are untrusted data. Discovery never
 activates tools. Explicit activation exposes schemas but doesn't approve tool
 side effects or provide per-call confirmation. Use tool filters and Pi permission

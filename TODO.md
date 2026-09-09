@@ -41,8 +41,6 @@ and [Claude Code MCP](https://code.claude.com/docs/en/mcp).
   never restored automatically.
 - [x] **Prompts:** Discover and run server-provided prompts with argument entry and
   explicit user selection. Treat prompt content as untrusted server data.
-- [ ] **Roots:** Advertise explicitly authorized workspace roots and notify servers
-  when they change. Roots are scope hints, not a filesystem sandbox.
 - [x] **Tool catalog notifications:** Handle `tools/list_changed` and invalidate
   stale catalogs without silently replacing an active tool contract.
 - [x] **Resource catalog notifications:** Invalidate resource metadata without
@@ -64,9 +62,12 @@ and [Claude Code MCP](https://code.claude.com/docs/en/mcp).
 - [x] **Server inspection and reload:** Inspect servers, browse tools, and reload
   configuration without restarting Pi; close connections and reconcile loaded tools.
 - [x] **Server enable/disable commands:** Toggle servers without editing configuration.
-- [ ] **Configuration imports:** Offer explicit, previewable imports from Claude,
-  Cursor, VS Code, Codex, and MCPorter. Never silently merge credentials or execute
-  imported commands.
+- [x] **Configuration imports:** Preview and select servers directly from Claude/
+  Cursor JSON (including Claude project groups) and Codex TOML, with scoped atomic
+  writes and explicit conflict resolution. Never silently merge credentials or
+  execute commands.
+- [ ] **Additional import formats:** Add adapters for VS Code and MCPorter
+  while preserving the preview, validation, and credential boundaries.
 - [ ] **Cache controls:** Inspect and clear catalogs, configure freshness, and show
   whether discovery used a cached or live catalog.
 - [ ] **Permission controls:** Offer per-server/tool confirmation policies or a
@@ -82,8 +83,6 @@ and [Claude Code MCP](https://code.claude.com/docs/en/mcp).
 
 - [ ] **Elicitation:** Handle supported server requests for user input, with explicit
   consent and clear cancellation or refusal in non-interactive sessions.
-- [ ] **Sampling:** Handle server requests for model generation with user approval,
-  model and cost limits, and control over which conversation context is shared.
 - [ ] **MCP Apps:** Investigate a suitable host for interactive tool interfaces.
   Require origin isolation and a permissions model; do not execute arbitrary
   server HTML inside the terminal.

@@ -44,7 +44,9 @@ permissions. Tool activation isn't a per-call approval prompt. See
 
 Store server definitions in `~/.pi/agent/mcp.json` or a trusted project's
 `.mcp.json`. Project definitions replace same-named global definitions in full.
-You can edit these files or use `/mcp add` and `/mcp remove`.
+You can edit these files or use `/mcp add` and `/mcp remove`. To reuse a
+Claude/Cursor JSON or Codex TOML file, run `/mcp import --scope global <path>` and
+review the selected connections before saving. No conversion file is needed.
 
 Detailed guides:
 

@@ -126,6 +126,8 @@ export const createSdkConnector = (storeFactory: CredentialStoreFactory = creden
   onPromptsChanged,
 ) => {
   const timeout = config.timeoutMs ?? 15_000;
+  const startupTimeout = config.startupTimeoutMs ?? timeout;
+  let connecting = true;
   const client = new Client(
     { name: "pi-mcp-client", version: "0.1.0" },
     {
@@ -148,7 +150,7 @@ export const createSdkConnector = (storeFactory: CredentialStoreFactory = creden
       },
       versionNegotiation: {
         mode: config.protocol ?? "auto",
-        probe: { timeoutMs: timeout },
+        probe: { timeoutMs: startupTimeout },
       },
     },
   );
@@ -164,12 +166,12 @@ export const createSdkConnector = (storeFactory: CredentialStoreFactory = creden
         requestInit: { headers: config.headers },
         authProvider: await connectionAuthProvider(name, config, storeFactory),
         // Bound HTTP responses (including OAuth), but not established SSE streams.
-        // The SDK bounds ordinary MCP requests with their request timeout.
+        // Accommodate startup/tool overrides; the SDK enforces each request's tighter deadline.
         fetch: async (input, init) => {
           const deadline = new AbortController();
           const timer = setTimeout(
             () => deadline.abort(new Error("HTTP response timed out.")),
-            timeout,
+            connecting ? startupTimeout : Math.max(timeout, config.toolTimeoutMs ?? timeout),
           );
           timer.unref();
           try {
@@ -194,10 +196,11 @@ export const createSdkConnector = (storeFactory: CredentialStoreFactory = creden
     transport.stderr?.on("data", () => {});
   try {
     await waitFor(
-      client.connect(transport, { signal, timeout }),
-      AbortSignal.any([signal, AbortSignal.timeout(timeout)]),
+      client.connect(transport, { signal, timeout: startupTimeout }),
+      AbortSignal.any([signal, AbortSignal.timeout(startupTimeout)]),
     );
     signal.throwIfAborted();
+    connecting = false;
     return { client, transport };
   } catch (error) {
     await client.close().catch(() => {});
@@ -757,7 +760,7 @@ export class McpRuntime {
             this.lifetime.signal,
             ...(signal ? [signal] : []),
           ]),
-          timeout: config.timeoutMs ?? 30_000,
+          timeout: config.toolTimeoutMs ?? config.timeoutMs ?? 30_000,
           onprogress: (event) =>
             progress?.(
               event.message ??
