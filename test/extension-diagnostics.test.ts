@@ -467,6 +467,12 @@ test("invalid argument combinations fail before any discovery or transport work"
       { activate: Array(51).fill("example.echo") }, { activate: [""] },
       { query: " " }, { query: "echo", limit: 0 }, { query: "echo", extra: true },
       { kind: "all" }, { query: "schema", kind: "invalid" }, { activate: ["example.echo"], kind: "all" },
+      { read: { server: "example", template: "schema://{id}" } },
+      { read: { server: "example", template: "schema://{id}", arguments: { id: 1 } } },
+      { read: { server: "example", template: "schema://{id}", arguments: { id: [1] } } },
+      { read: { server: "example", template: "schema://{id}", arguments: { id: {} } } },
+      { read: { server: "example", uri: "schema://x", arguments: {} } },
+      { read: { server: "example", uri: "schema://x", template: "schema://{id}", arguments: {} } },
       { read: null }, { read: [] }, { read: {} }, { read: { server: "example" } },
       { read: { server: "example", uri: "relative" } }, { read: { server: "example", uri: "schema://x", extra: true } },
       { read: { server: "example", uri: "schema://x" }, query: "schema" },
@@ -508,6 +514,22 @@ test("resource discovery and reading work headlessly without tool activation", a
     expect(restoredTools([{ type: "message", message: { role: "toolResult", toolName: "mcp_tools", details: result.details } } as any])).toEqual([]);
     expect((await h.execute("mcp_tools", { query: "analytics", kind: "tools" })).details.candidates).toEqual([]);
   } finally { read.mockRestore(); }
+});
+
+test("template discovery and parameterized reads preserve the native tool set", async () => {
+  const h = await host(JSON.stringify({ mcpServers: { example: fixtureServer } }));
+  h.ctx.hasUI = false;
+  const discovered = await h.execute("mcp_tools", { query: "schema://tables/{table}", kind: "resources" });
+  const candidate = discovered.details.candidates[0];
+  expect(candidate.kind).toBe("template");
+  expect(candidate.variables).toEqual(["table"]);
+  expect(candidate.nextCall.read).toEqual({ server: "example", template: "schema://tables/{table}", arguments: {} });
+  const result = await h.execute("mcp_tools", { read: { ...candidate.nextCall.read, arguments: { table: "events" } } });
+  expect(result.details.rows[0].label).toBe("example · schema://tables/events");
+  expect(JSON.stringify(result.content)).toContain("events");
+  expect(JSON.stringify(result.content)).toContain("Template:");
+  expect(result.details.loaded).toBeUndefined();
+  expect(h.activeTools()).toEqual(["mcp_tools"]);
 });
 
 test("resource reads that finish after reload do not attach stale content", async () => {

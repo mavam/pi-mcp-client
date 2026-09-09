@@ -23,7 +23,10 @@ Pushing runs the quality gates automatically. To run them manually, use
 - Keep one model-facing `mcp_tools` tool: `{query, kind?, server?, limit?}` discovers
   tool and resource metadata (`kind` defaults to `all`); `{activate: ["server.tool"]}`
   explicitly activates exact identifiers cumulatively; `{read: {server, uri}}`
-  fetches one resource as context. Discovery never reads content or activates tools.
+  fetches one resource as context. `{read: {server, template, arguments}}` expands
+  an advertised template through the SDK before reading. Discovery never reads
+  content or activates tools. Keep template parsing and expansion in the SDK;
+  variable names don't imply an argument schema or required fields.
   Keep native tool invocation; do not add an invocation proxy or per-prompt schema dumps.
 - Validate mutually exclusive query/activation/read arguments before connecting.
   Persist discovery as `details.candidates`; only activation writes `details.loaded`.

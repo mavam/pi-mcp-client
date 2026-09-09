@@ -7,7 +7,7 @@ import { McpServer, ResourceTemplate } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 import { McpRuntime, type ConnectFactory } from "../src/runtime.js";
 import { prepareTool } from "../src/catalog.js";
-import { prepareResource, searchCapabilities, validResourceUri } from "../src/resources.js";
+import { prepareResource, prepareResourceTemplate, searchCapabilities, validResourceUri, validTemplateRead } from "../src/resources.js";
 import { convertResourceResult, convertResult } from "../src/output.js";
 import { restoredTools } from "../src/exposure.js";
 import type { Theme } from "@earendil-works/pi-coding-agent";
@@ -91,7 +91,93 @@ test("resource descriptors reject unsafe URIs and bound metadata", () => {
   expect(resource.description).toHaveLength(8000);
 });
 
+test("template pagination, partial failures, and cache expiry stay independent of resources", async () => {
+  const f = await fixture();
+  await f.runtime.readResource("example", "schema://analytics");
+  let pages = 0;
+  f.servers[0].server.setRequestHandler("resources/templates/list", async (request) => {
+    pages++;
+    return { resourceTemplates: [{ name: "page", uriTemplate: request.params?.cursor ? "page://second/{id}" : "page://first/{id}" }],
+      ...(request.params?.cursor ? {} : { nextCursor: "next" }) };
+  });
+  expect(await f.runtime.resourceCatalog("example", undefined, false, true)).toHaveLength(2);
+  expect(pages).toBe(2);
+  await f.runtime.resourceCatalog("example", undefined, false, true);
+  expect(pages).toBe(2);
+  const now = Date.now();
+  const clock = spyOn(Date, "now").mockReturnValue(now + 300_001);
+  try { await f.runtime.resourceCatalog("example", undefined, false, true); }
+  finally { clock.mockRestore(); }
+  expect(pages).toBe(4);
+  const broken = spyOn(f.clients[0], "listResourceTemplates").mockRejectedValue(new Error("private-template-error"));
+  try {
+    f.notifications[0]();
+    const result = await f.runtime.discover(undefined, undefined, "resources");
+    expect(result.resources).toHaveLength(1);
+    expect(result.templates).toEqual([]);
+    expect(result.unavailable[0]).toContain("templates:");
+    expect(JSON.stringify(result)).not.toContain("private-template-error");
+    expect(f.reads()).toBe(1);
+  } finally { broken.mockRestore(); }
+});
+
+test("template listing shares work, honors cancellation, and rejects stale notification results", async () => {
+  const f = await fixture();
+  await f.runtime.readResource("example", "schema://analytics");
+  let finish!: () => void;
+  let lists = 0;
+  f.servers[0].server.setRequestHandler("resources/templates/list", async () => {
+    lists++;
+    if (lists === 1) await new Promise<void>((resolve) => { finish = resolve; });
+    return { resourceTemplates: [{ name: "schema", uriTemplate: lists === 1 ? "old://{id}" : "new://{id}" }] };
+  });
+  const controller = new AbortController();
+  const cancelled = f.runtime.resourceCatalog("example", controller.signal, false, true).catch((error) => String(error));
+  const shared = f.runtime.resourceCatalog("example", undefined, false, true);
+  await eventually(async () => !!finish);
+  await expect(f.runtime.disconnect(["example"])).rejects.toThrow("busy");
+  controller.abort();
+  f.notifications[0]();
+  finish();
+  expect(await cancelled).toContain("abort");
+  expect((await shared)[0].uri).toBe("new://{id}");
+  expect(lists).toBe(2);
+  expect(f.reads()).toBe(1);
+});
+
+test("template metadata and argument validation use SDK variable and expansion semantics", () => {
+  const entry = prepareResourceTemplate("s", "id", { name: "docs", uriTemplate: "{+base}/docs{/path*}{?q,tags*}" });
+  expect(entry.variables).toEqual(["base", "path", "q", "tags"]);
+  expect(validTemplateRead({ template: entry.uri, arguments: { base: "https://example.com", path: ["a", "b"], tags: ["x", "y"] } })).toBe(true);
+  expect(validTemplateRead({ template: "docs://host{?q}", arguments: {} })).toBe(true);
+  expect(validTemplateRead({ template: "docs://host{?q}", arguments: { q: {} } })).toBe(false);
+  const candidates = searchCapabilities([], [], entry.uri, undefined, 5, [entry]);
+  expect(candidates[0].kind).toBe("template");
+  expect(candidates[0].nextCall).toEqual({ read: { server: "s", template: entry.uri, arguments: {} } });
+});
+
 for (const protocol of ["auto", "legacy"] as const) {
+  test(`SDK template discovery and expansion are metadata-only (${protocol})`, async () => {
+    const f = await fixture(protocol);
+    const discovered = await f.runtime.discover(undefined, undefined, "resources");
+    expect(discovered.templates).toHaveLength(1);
+    expect(discovered.templates![0].variables).toEqual(["id"]);
+    expect(f.reads()).toBe(0);
+    const uri = await f.runtime.expandResourceTemplate({ server: "example", template: "record://hidden/{id}", arguments: { id: "one/two" } });
+    expect(uri).toBe("record://hidden/one%2Ftwo");
+    expect(f.reads()).toBe(0);
+    await f.runtime.readResource("example", uri);
+    expect(f.reads()).toBe(1);
+    await expect(f.runtime.expandResourceTemplate({ server: "example", template: "record://other/{id}", arguments: { id: "x" } })).rejects.toThrow("resource_not_found");
+    expect(f.reads()).toBe(1);
+    const templates = spyOn(f.clients[0], "listResourceTemplates");
+    await f.runtime.resourceCatalog("example", undefined, false, true);
+    expect(templates).not.toHaveBeenCalled();
+    f.notifications[0]();
+    await f.runtime.resourceCatalog("example", undefined, false, true);
+    expect(templates).toHaveBeenCalledTimes(1);
+    templates.mockRestore();
+  });
   test(`resource discovery and exact unlisted reads use the SDK (${protocol})`, async () => {
     const f = await fixture(protocol);
     const discovered = await f.runtime.discover(undefined, undefined, "all");

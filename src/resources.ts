@@ -1,9 +1,23 @@
 import MiniSearch from "minisearch";
+import { UriTemplate, type Variables } from "@modelcontextprotocol/client";
 import { DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT, line, plain, searchTools, tokens, type CatalogTool } from "./catalog.js";
 import { object } from "./config.js";
 
 export type DiscoveryKind = "all" | "tools" | "resources";
 export interface ResourceTarget { server: string; uri: string }
+export interface TemplateTarget { server: string; template: string; arguments: Variables }
+
+export function validTemplateRead(value: Record<string, unknown>): boolean {
+  if (value.uri !== undefined || !validTemplate(value.template) || !object(value.arguments)) return false;
+  const entries = Object.entries(value.arguments);
+  if (entries.length > 100) return false;
+  if (!entries.every(([key, item]) => key.length <= 512 &&
+    (typeof item === "string" ? item.length <= 4096 : Array.isArray(item) && item.length <= 100 &&
+      item.every((v) => typeof v === "string" && v.length <= 4096)))) return false;
+  if (Buffer.byteLength(JSON.stringify(value.arguments)) > 64 * 1024) return false;
+  try { return validResourceUri(new UriTemplate(value.template).expand(value.arguments as Variables)); }
+  catch { return false; }
+}
 export interface CatalogResource extends ResourceTarget {
   name: string;
   title?: string;
@@ -11,10 +25,12 @@ export interface CatalogResource extends ResourceTarget {
   mimeType?: string;
   size?: number;
   identity: string;
+  variables?: string[];
 }
 export type Candidate =
   | (CatalogTool & { kind: "tool"; nextCall: { activate: string[] } })
-  | (CatalogResource & { kind: "resource"; nextCall: { read: ResourceTarget } });
+  | (CatalogResource & { kind: "resource"; nextCall: { read: ResourceTarget } })
+  | (CatalogResource & { kind: "template"; nextCall: { read: TemplateTarget } });
 
 /** URIs identify MCP resources; they are never fetched as URLs or opened as files. */
 export function validResourceUri(value: unknown): value is string {
@@ -24,15 +40,19 @@ export function validResourceUri(value: unknown): value is string {
 }
 
 export function prepareResource(server: string, identity: string, value: unknown): CatalogResource {
-  if (!object(value) || !validResourceUri(value.uri) ||
-      typeof value.name !== "string" || !line(value.name) || value.name.length > 512 ||
+  if (!object(value) || !validResourceUri(value.uri)) throw new Error("Invalid resource URI.");
+  return prepareDescriptor(server, identity, value, value.uri);
+}
+
+function prepareDescriptor(server: string, identity: string, value: Record<string, unknown>, uri: string): CatalogResource {
+  if (typeof value.name !== "string" || !line(value.name) || value.name.length > 512 ||
       (value.title !== undefined && typeof value.title !== "string") ||
       (value.description !== undefined && typeof value.description !== "string") ||
       (value.mimeType !== undefined && (typeof value.mimeType !== "string" || value.mimeType.length > 256)) ||
       (value.size !== undefined && (typeof value.size !== "number" || !Number.isSafeInteger(value.size) || value.size < 0)))
     throw new Error("Invalid resource descriptor.");
   return {
-    server, identity, uri: value.uri, name: plain(value.name),
+    server, identity, uri, name: plain(value.name),
     description: plain(value.description as string ?? "No description supplied.").slice(0, 8000),
     ...(value.title === undefined ? {} : { title: plain(value.title as string).slice(0, 512) }),
     ...(value.mimeType === undefined ? {} : { mimeType: line(value.mimeType as string) }),
@@ -40,26 +60,41 @@ export function prepareResource(server: string, identity: string, value: unknown
   };
 }
 
+function validTemplate(value: unknown): value is string {
+  if (typeof value !== "string" || !value || value.length > 4096 || /[\x00-\x20\x7f-\x9f\u202a-\u202e\u2066-\u2069]/u.test(value)) return false;
+  try { new UriTemplate(value); return true; } catch { return false; }
+}
+
+export function prepareResourceTemplate(server: string, identity: string, value: unknown): CatalogResource {
+  if (!object(value) || !validTemplate(value.uriTemplate)) throw new Error("Invalid resource template.");
+  const template = new UriTemplate(value.uriTemplate);
+  // A template need not be absolute until expansion, e.g. {+base}/docs/{id}.
+  return { ...prepareDescriptor(server, identity, value, value.uriTemplate), variables: template.variableNames };
+}
+
 /** One ranked result set and one limit, with executable next steps but no resource bodies. */
 export function searchCapabilities(
   tools: CatalogTool[], resources: CatalogResource[], query: string,
-  server?: string, limit = DEFAULT_SEARCH_LIMIT,
+  server?: string, limit = DEFAULT_SEARCH_LIMIT, templates: CatalogResource[] = [],
 ): Candidate[] {
   const toolCandidate = (tool: CatalogTool): Candidate => ({
     ...tool, kind: "tool", nextCall: { activate: [`${tool.server}.${tool.name}`] },
   });
-  if (!resources.length) return searchTools(tools, query, server, limit).map(toolCandidate);
+  if (!resources.length && !templates.length) return searchTools(tools, query, server, limit).map(toolCandidate);
   const candidates: Candidate[] = [
     ...tools.map(toolCandidate),
     ...resources.map((resource): Candidate => ({
       ...resource, kind: "resource", nextCall: { read: { server: resource.server, uri: resource.uri } },
+    })),
+    ...templates.map((template): Candidate => ({
+      ...template, kind: "template", nextCall: { read: { server: template.server, template: template.uri, arguments: {} } },
     })),
   ].filter((candidate) => !server || candidate.server === server);
   const needle = query.trim();
   const cap = Math.max(1, Math.min(limit, MAX_SEARCH_LIMIT));
   const key = (candidate: Candidate) => JSON.stringify([candidate.kind, candidate.server,
     candidate.kind === "tool" ? candidate.name : candidate.uri]);
-  const exact = candidates.filter((candidate) => candidate.kind === "resource"
+  const exact = candidates.filter((candidate) => candidate.kind !== "tool"
     ? candidate.uri === needle
     : [candidate.nativeName, `${candidate.server}.${candidate.name}`].some((name) => name.toLowerCase() === needle.toLowerCase()));
   if (exact.length) return exact.sort((a, b) => key(a).localeCompare(key(b))).slice(0, cap);

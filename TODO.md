@@ -33,9 +33,11 @@ and [Claude Code MCP](https://code.claude.com/docs/en/mcp).
 - [x] **Resources:** Discover tool and resource metadata together, then read selected
   resources as bounded conversation context. Exact tool-returned resource links
   can be read without prior discovery. No manual resource browser is required.
-- [ ] **Resource templates and subscriptions:** Discover and expand resource
-  templates; evaluate explicit subscriptions without silently replacing attached
-  content snapshots.
+- [x] **Resource templates:** Discover template metadata and read parameterized
+  resources through SDK URI expansion, without inferred argument schemas.
+- [ ] **Resource completions and subscriptions:** Add server-provided argument
+  completions and evaluate explicit subscriptions without silently replacing
+  attached content snapshots.
 - [ ] **Prompts:** Discover and run server-provided prompts with argument entry and
   explicit user selection. Treat prompt content as untrusted server data.
 - [ ] **Roots:** Advertise explicitly authorized workspace roots and notify servers
