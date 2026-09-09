@@ -3,7 +3,9 @@ title: Separate OAuth logins for named servers
 type: breaking
 authors:
   - mavam
-created: 2026-09-09T14:34:11.708391Z
+prs:
+  - 23
+created: 2026-09-09T14:35:33.540985Z
 ---
 
 Each named MCP server now has its own OAuth login, even when multiple servers use the same URL and client ID. You can keep personal and work accounts connected at the same time by giving them different server names:
