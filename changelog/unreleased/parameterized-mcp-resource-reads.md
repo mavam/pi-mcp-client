@@ -3,7 +3,9 @@ title: Parameterized MCP resource reads
 type: feature
 authors:
   - mavam
-created: 2026-09-09T09:23:51.263925Z
+prs:
+  - 16
+created: 2026-09-09T09:26:36.642113Z
 ---
 
 Pi can now discover resource URI templates and read parameterized resources without enumerating every possible URI.
