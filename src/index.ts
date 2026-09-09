@@ -333,9 +333,19 @@ export default function mcpClient(
           // Long server names can have a truncated, hashed native name.
           (`mcp__${name}__`.length > 50 && identifier.startsWith(`mcp__${name}__`.slice(0, 50))),
         );
+        const activationLabel = (identifier: string, tool?: CatalogTool) => {
+          if (tool) return `${tool.server} · ${tool.name}`;
+          const server = serversFor(identifier).find((name) =>
+            identifier.startsWith(`${name}.`) || identifier.startsWith(`mcp__${name}__`));
+          if (!server) return line(identifier);
+          const prefix = identifier.startsWith(`${server}.`) ? `${server}.` : `mcp__${server}__`;
+          return `${server} · ${line(identifier.slice(prefix.length))}`;
+        };
         onUpdate?.(textResult(hasActivate ? "Activating MCP tools…" : "Searching MCP catalog…", {
           mcpClient: 1,
-          rows: [{ label: args.query ?? identifiers.join(", "), state: "running" }],
+          rows: hasActivate
+            ? identifiers.map((identifier) => ({ label: activationLabel(identifier), state: "running" }))
+            : [{ label: args.query!, state: "running" }],
         }));
         const discovery = await activeRuntime.discover(
           hasActivate ? identifiers.flatMap(serversFor) : args.server ?? (validResourceUri(args.query) || args.kind === "resources" ? undefined : serversFor(args.query!)[0]),
@@ -403,9 +413,9 @@ export default function mcpClient(
             const label = `${line(identifier)} — ${ok ? added.includes(tool.nativeName) ? "loaded" : "already loaded" : `not loaded — ${reason}`}`;
             messages.push(label);
             details.rows.push({
-              label: line(identifier),
+              label: activationLabel(identifier, tool),
               ...(ok ? {} : { inlineDescription: reason }),
-              state: ok ? "done" : "failed",
+              state: ok ? added.includes(tool.nativeName) ? "done" : "active" : "failed",
             });
           }
           if (loaded.length) messages.push("Call the loaded tools directly. Their full schemas are now available.");
@@ -415,12 +425,18 @@ export default function mcpClient(
         const converted = await convertResult({ content: [{ type: "text", text: messages.join("\n") }] }, "MCP catalog");
         return { ...converted, details: { ...converted.details, ...details } };
       } catch (error) {
-        return errorResult(error, {
+        const result = errorResult(error, {
           server: args.read?.server ?? args.server,
           operation: hasRead ? "read" : "search",
           oauth: config[args.read?.server ?? args.server ?? ""]?.oauth,
           signal: ctx.signal?.aborted ? ctx.signal : signal,
         });
+        if (args.read) {
+          const row = result.details.rows[0];
+          row.label = `${args.read.server} · ${args.read.uri}`;
+          row.inlineDescription = result.details.diagnostics?.[0].message;
+        }
+        return result;
       }
     },
   });

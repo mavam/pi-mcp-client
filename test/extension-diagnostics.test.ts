@@ -430,6 +430,31 @@ test("typos fail with catalog suggestions, while partial activation succeeds", a
   expect(h.hooks.get("tool_result")({ toolName: "mcp_tools", details: partial.details })).toBeUndefined();
 });
 
+test("reads and activation share target rows and distinguish new from active tools", async () => {
+  const h = await host(JSON.stringify({ mcpServers: { example: fixtureServer } }));
+  const updates: any[] = [];
+  const activated = await h.execute("mcp_tools", { activate: ["example.echo", "example.fail"] }, (result) => updates.push(result));
+  expect(updates[0].details.rows).toEqual([
+    { label: "example · echo", state: "running" },
+    { label: "example · fail", state: "running" },
+  ]);
+  expect(activated.details.rows).toEqual([
+    { label: "example · echo", state: "done" },
+    { label: "example · fail", state: "done" },
+  ]);
+  const repeated = await h.execute("mcp_tools", { activate: ["mcp__example__echo", "example.missing"] });
+  expect(repeated.details.rows[0]).toEqual({ label: "example · echo", state: "active" });
+  expect(repeated.details.rows[1]).toMatchObject({ label: "example · missing", state: "failed" });
+  expect(repeated.details.rows[1].inlineDescription).toContain("unknown identifier");
+  updates.length = 0;
+  const read = await h.execute("mcp_tools", { read: { server: "example", uri: "schema://analytics" } }, (result) => updates.push(result));
+  expect(updates[0].details.rows).toEqual([{ label: "example · schema://analytics", state: "running" }]);
+  expect(read.details.rows).toEqual([{ label: "example · schema://analytics", state: "done" }]);
+  const missing = await h.execute("mcp_tools", { read: { server: "example", uri: "schema://missing" } });
+  expect(missing.details.rows[0]).toMatchObject({ label: "example · schema://missing", state: "failed" });
+  expect(missing.details.rows[0].inlineDescription).toContain("not found");
+});
+
 test("invalid argument combinations fail before any discovery or transport work", async () => {
   const h = await host(JSON.stringify({ mcpServers: { example: fixtureServer } }));
   const discover = spyOn(McpRuntime.prototype, "discover");

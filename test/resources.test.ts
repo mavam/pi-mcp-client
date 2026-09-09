@@ -12,7 +12,7 @@ import { convertResourceResult, convertResult } from "../src/output.js";
 import { restoredTools } from "../src/exposure.js";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { renderResult } from "../src/render.js";
+import { renderCall, renderResult } from "../src/render.js";
 
 const cleanup: (() => Promise<unknown> | void)[] = [];
 afterEach(async () => { for (const fn of cleanup.splice(0).reverse()) await fn(); });
@@ -406,6 +406,17 @@ test("resource output remains width-safe and strips terminal escapes for display
   const result = await convertResourceResult({ contents: [{ uri: "schema://one", mimeType: "application/json", text: '{"key":"界\\u001b[31m"}' }] },
     { server: "example", uri: "schema://one" });
   const theme = { fg: (_: string, text: string) => text, bold: (text: string) => text } as unknown as Theme;
+  for (const expanded of [true, false]) for (const [title, args] of [
+    ["mcp read", { read: result.details.resource }],
+    ["mcp activate", { activate: ["example.echo"] }],
+  ] as const) {
+    const header = renderCall(title, args, theme, expanded).render(120).join("\n");
+    expect(header).toContain(title);
+    expect(header).not.toContain("=");
+    expect(header).not.toContain("example");
+  }
+  const collapsed = renderResult(result, { expanded: false, isPartial: false }, theme, false).render(120).join("\n");
+  expect(collapsed).toContain("example · schema://one");
   for (const expanded of [true, false]) for (const width of [0, 1, 20, 80]) {
     const lines = renderResult(result, { expanded, isPartial: false }, theme, false).render(width);
     expect(lines.every((row) => visibleWidth(row) <= width)).toBe(true);
