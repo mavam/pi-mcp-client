@@ -637,7 +637,7 @@ test("command completion suggests actions first and servers only after an action
   } }));
   const complete = h.commands.get("mcp").getArgumentCompletions;
   expect(complete("")).toEqual(
-    ["list", "status", "reload", "add", "remove", "enable", "disable", "get", "tools", "login", "logout", "reconnect", "refresh"]
+    ["list", "status", "reload", "subscriptions", "add", "remove", "enable", "disable", "get", "tools", "login", "logout", "reconnect", "refresh", "subscribe", "unsubscribe"]
       .map((value) => ({ value, label: value })),
   );
   expect(complete("to")).toEqual([{ value: "tools", label: "tools" }]);
@@ -969,4 +969,68 @@ test("native tools distinguish server-reported errors from cancelled calls", asy
   expect(cancelled.details.rows[0].label).toBe("Cancelled");
   expect(JSON.stringify(cancelled.content)).toContain("not replayed");
   expect(JSON.stringify(cancelled)).not.toContain("private-token");
+});
+
+test("resource completions are exclusive, bounded suggestions and never restore tools", async () => {
+  const h = await host(JSON.stringify({ mcpServers: { example: fixtureServer } }));
+  const complete = { server: "example", template: "schema://tables/{table}", argument: { name: "table", value: "e" } };
+  const result = await h.execute("mcp_tools", { complete });
+  expect(result.content[0].text).toContain('"values":["events"]');
+  expect(result.details.loaded).toBeUndefined();
+  expect(result.details.candidates).toBeUndefined();
+  expect(result.details.resource).toBeUndefined();
+  expect(h.activeTools()).toEqual(["mcp_tools"]);
+  for (const other of [{ query: "table" }, { activate: ["example.echo"] }, { read: { server: "example", uri: "schema://analytics" } }, { kind: "resources" }, { limit: 1 }, { server: "example" }]) {
+    const invalid = await h.execute("mcp_tools", { complete, ...other });
+    expect(invalid.details.failed).toBe(true);
+    expect(invalid.content[0].text).toContain("Use exactly one");
+  }
+  const huge = spyOn(McpRuntime.prototype, "completeResource").mockResolvedValue({ values: ["x".repeat(70_000)], total: 1, hasMore: false });
+  try {
+    const bounded = await h.execute("mcp_tools", { complete });
+    expect(Buffer.byteLength(bounded.content[0].text)).toBeLessThan(53_000);
+    expect(bounded.details.fullOutputPath).toBeDefined();
+    cleanup.push(() => rm(join(bounded.details.fullOutputPath, ".."), { recursive: true, force: true }));
+  } finally { huge.mockRestore(); }
+});
+
+test("invalid completions and subscription commands fail before runtime access", async () => {
+  const h = await host('{"mcpServers":{"example":{"command":"must-not-execute"}}}');
+  const complete = { server: "example", template: "schema://{id}", argument: { name: "id", value: "" } };
+  for (const args of [{ complete: null }, { complete, query: "x" }, { complete: { ...complete, arguments: { id: [] } } }, { subscribe: { server: "example", uri: "schema://x" } }]) {
+    expect((await h.execute("mcp_tools", args)).details.failed).toBe(true);
+  }
+  await h.command("subscribe example /etc/passwd");
+  expect(h.notifications.at(-1)).toContain("exact absolute URI");
+  h.ctx.hasUI = false;
+  const subscribe = spyOn(McpRuntime.prototype, "setResourceSubscription");
+  try {
+    await expect(h.command("subscribe example schema://x")).rejects.toThrow("interactive session");
+    expect(subscribe).not.toHaveBeenCalled();
+  } finally { subscribe.mockRestore(); }
+  h.ctx.hasUI = true;
+  await h.command("get example");
+  expect(h.activeTools()).toEqual(["mcp_tools"]);
+});
+
+test("user watches leave snapshots and tools untouched and clear on tree navigation and reload", async () => {
+  const h = await host(JSON.stringify({ mcpServers: { example: fixtureServer } }));
+  const snapshot = await h.execute("mcp_tools", { read: { server: "example", uri: "schema://analytics" } });
+  const original = JSON.stringify(snapshot);
+  await h.command("subscribe example schema://analytics");
+  await Bun.sleep(30);
+  expect(h.notifications.some((message) => message.includes("Attached snapshots are unchanged"))).toBe(true);
+  await h.command("subscriptions");
+  expect(h.notifications.at(-1)).toContain("schema://analytics · changed");
+  expect(JSON.stringify(snapshot)).toBe(original);
+  expect(h.activeTools()).toEqual(["mcp_tools"]);
+  await h.hooks.get("session_tree")({}, h.ctx);
+  await h.command("subscriptions");
+  expect(h.notifications.at(-1)).toBe("No active resource subscriptions.");
+  await h.command("subscribe example schema://analytics");
+  await h.command("reload");
+  await h.command("subscriptions");
+  expect(h.notifications.at(-1)).toBe("No active resource subscriptions.");
+  await h.command("unsubscribe example schema://analytics");
+  expect(h.notifications.at(-1)).toContain("removed");
 });

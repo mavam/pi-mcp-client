@@ -22,8 +22,9 @@ import {
   type ServerConfig,
 } from "./config.js";
 import { prepareTool, type CatalogTool } from "./catalog.js";
-import { prepareResource, prepareResourceTemplate, validTemplateRead, validResourceUri, type TemplateTarget, type CatalogResource, type DiscoveryKind } from "./resources.js";
+import { prepareResource, prepareResourceTemplate, validTemplateRead, validResourceUri, validCompletion, type CompletionTarget, type TemplateTarget, type CatalogResource, type DiscoveryKind } from "./resources.js";
 import { credentialStore, OAuthProvider } from "./auth.js";
+import { ResourceSubscriptions } from "./subscriptions.js";
 import { resolveSecrets } from "./secrets.js";
 import {
   diagnose,
@@ -53,6 +54,7 @@ interface ServerState extends ResourceMetadataCache {
   catalogGeneration: number;
   resourceGeneration: number;
   templateCache?: ResourceMetadataCache;
+  subscriptions?: ResourceSubscriptions;
   catalogDirty?: boolean;
   invalidating?: Promise<void>;
   tools?: CatalogTool[];
@@ -202,6 +204,10 @@ export class McpRuntime {
     private readonly connect: ConnectFactory = connectSdk,
   ) {}
 
+  onResourceUpdated?: (server: string, uri: string) => void;
+  private subscriptionGeneration = 0;
+  private subscriptionCleanup: Promise<void> = Promise.resolve();
+
   identity(name: string): string {
     const config = this.definition(name);
     let resolved: ServerConfig;
@@ -307,6 +313,9 @@ export class McpRuntime {
           state.client = undefined;
           state.transport = undefined;
           state.connectionToken = undefined;
+          const subscriptions = state.subscriptions;
+          state.subscriptions = undefined;
+          void subscriptions?.close(false);
           state.resourceGeneration++;
           state.resources = undefined;
         }
@@ -478,6 +487,77 @@ export class McpRuntime {
     return uri;
   }
 
+  async completeResource(target: CompletionTarget, signal?: AbortSignal) {
+    if (!validCompletion(target)) throw failure("completion_invalid", { operation: "complete" });
+    const config = Object.hasOwn(this.config, target.server) ? this.config[target.server] : undefined;
+    if (!config || config.disabled)
+      throw failure(config ? "server_disabled" : "server_unknown", { server: target.server, operation: "complete" });
+    const combined = AbortSignal.any([this.lifetime.signal, ...(signal ? [signal] : [])]);
+    combined.throwIfAborted();
+    const templates = await this.resourceCatalog(target.server, combined, false, true);
+    const template = templates.find((entry) => entry.uri === target.template);
+    if (!template) throw failure("resource_not_found", { server: target.server, operation: "complete" });
+    if (!template.variables?.includes(target.argument.name))
+      throw failure("completion_invalid", { server: target.server, operation: "complete" });
+    const client = await waitFor(this.client(target.server), combined);
+    if (!client.getServerCapabilities()?.completions)
+      throw failure("completions_unsupported", { server: target.server, operation: "complete" });
+    const result = await client.complete({
+      ref: { type: "ref/resource", uri: target.template }, argument: target.argument,
+      ...(target.arguments === undefined ? {} : { context: { arguments: target.arguments } }),
+    }, { signal: combined, timeout: config.timeoutMs ?? 15_000 });
+    combined.throwIfAborted();
+    // Never retain arbitrary extension fields returned by a server.
+    return { values: result.completion.values, total: result.completion.total, hasMore: result.completion.hasMore };
+  }
+
+  resourceSubscriptions() {
+    return [...this.states].flatMap(([server, state]) =>
+      (state.subscriptions?.list() ?? []).map((watch) => ({ server, ...watch })));
+  }
+
+  async setResourceSubscription(name: string, uri: string, subscribe: boolean, signal?: AbortSignal) {
+    if (!validResourceUri(uri)) throw failure("resource_invalid", { server: name, operation: "subscribe" });
+    const definition = Object.hasOwn(this.config, name) ? this.config[name] : undefined;
+    if (!definition || definition.disabled)
+      throw failure(definition ? "server_disabled" : "server_unknown", { server: name, operation: "subscribe" });
+    const generation = this.subscriptionGeneration;
+    const combined = AbortSignal.any([this.lifetime.signal, ...(signal ? [signal] : [])]);
+    combined.throwIfAborted();
+    if (!subscribe) {
+      await this.states.get(name)?.subscriptions?.set(uri, false, combined);
+      return;
+    }
+    await waitFor(this.subscriptionCleanup, combined);
+    combined.throwIfAborted();
+    if (generation !== this.subscriptionGeneration || this.closing)
+      throw failure("cancelled", { server: name, operation: "subscribe" });
+    const client = await waitFor(this.client(name), combined);
+    combined.throwIfAborted();
+    if (generation !== this.subscriptionGeneration || this.closing)
+      throw failure("cancelled", { server: name, operation: "subscribe" });
+    const state = this.state(name);
+    const subscriptions = state.subscriptions ??= new ResourceSubscriptions(client, name, definition.timeoutMs ?? 15_000,
+      (updated) => {
+        if (!this.closing && state.client === client && state.subscriptions === subscriptions)
+          this.onResourceUpdated?.(name, updated);
+      });
+    await subscriptions.set(uri, true, combined);
+  }
+
+  clearResourceSubscriptions(): Promise<void> {
+    this.subscriptionGeneration++;
+    const closing = [...this.states.values()].map(async (state) => {
+      const subscriptions = state.subscriptions;
+      state.subscriptions = undefined;
+      await subscriptions?.close();
+    });
+    // A new branch must not subscribe until the old branch's legacy
+    // unsubscriptions have finished cancelling the same URIs.
+    this.subscriptionCleanup = Promise.all([this.subscriptionCleanup, ...closing]).then(() => {});
+    return this.subscriptionCleanup;
+  }
+
   async readResource(name: string, uri: string, signal?: AbortSignal): Promise<ReadResourceResult> {
     signal?.throwIfAborted();
     const config = Object.hasOwn(this.config, name) ? this.config[name] : undefined;
@@ -626,6 +706,8 @@ export class McpRuntime {
       const state = this.states.get(name);
       if (!state) return;
       state.connectionToken = undefined;
+      await state.subscriptions?.close();
+      state.subscriptions = undefined;
       state.catalogGeneration++;
       const identity = state.identity ?? state.connectionIdentity;
       await state.client?.autoOpenedSubscription?.close().catch(() => {});
@@ -645,6 +727,8 @@ export class McpRuntime {
     const state = this.state(name);
     if (state.connecting || state.listing || state.resourceListing || state.templateCache?.resourceListing)
       throw failure("busy", { server: name, operation: "reconnect" });
+    await state.subscriptions?.close();
+    state.subscriptions = undefined;
     await state.client?.autoOpenedSubscription?.close();
     await state.client?.close();
     state.client = undefined;
@@ -677,6 +761,7 @@ export class McpRuntime {
     return (this.closing ??= this.shutdown());
   }
   private async shutdown(): Promise<void> {
+    await this.clearResourceSubscriptions();
     // Send subscription cancellation while HTTP is still usable, then abort work.
     await Promise.all(
       [...this.states.values()].map((state) =>

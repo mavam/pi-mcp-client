@@ -27,8 +27,13 @@ Pushing runs the quality gates automatically. To run them manually, use
   an advertised template through the SDK before reading. Discovery never reads
   content or activates tools. Keep template parsing and expansion in the SDK;
   variable names don't imply an argument schema or required fields.
+  `{complete: {server, template, argument: {name, value}, arguments?}}` requests
+  server-provided template suggestions without reading or activating anything.
+  Resource subscriptions are user-only `/mcp subscribe|unsubscribe` commands;
+  keep watches memory-only, coalesce change notifications, never fetch content
+  automatically, and clear watches on branch/session changes and disconnects.
   Keep native tool invocation; do not add an invocation proxy or per-prompt schema dumps.
-- Validate mutually exclusive query/activation/read arguments before connecting.
+- Validate mutually exclusive query/activation/read/completion arguments before connecting.
   Persist discovery as `details.candidates`; only activation writes `details.loaded`.
 - Route resource reads only through the owning MCP server. Never fetch resource
   URIs as local files or generic URLs, follow content links automatically, or
