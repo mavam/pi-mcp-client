@@ -71,21 +71,21 @@ test("callback pages retain Pi branding without external assets or reflected dat
 test("dynamic registrations renew for changed options without splitting credential identity", () => {
   const store = memoryStore();
   const issuer = "https://issuer.example";
-  const first = new OAuthProvider(definition.url, store, undefined, undefined);
+  const first = new OAuthProvider({ server: "example", url: definition.url }, store);
   first.saveClientInformation({ client_id: "dynamic", issuer }, { issuer });
   first.saveTokens({ access_token: "private-token", token_type: "Bearer", issuer });
   const options = { oauthScopes: ["read"], oauthCallbackPort: 19848 };
-  const changed = new OAuthProvider(definition.url, store, () => {}, undefined, options);
+  const changed = new OAuthProvider({ server: "example", url: definition.url }, store, () => {}, options);
   expect(changed.clientInformation({ issuer })).toBeUndefined();
   expect(changed.tokens()?.access_token).toBe("private-token");
-  expect(new OAuthProvider(definition.url, store, undefined, undefined, options).clientInformation({ issuer })?.client_id).toBe("dynamic");
+  expect(new OAuthProvider({ server: "example", url: definition.url }, store, undefined, options).clientInformation({ issuer })?.client_id).toBe("dynamic");
   changed.saveClientInformation({ client_id: "new-dynamic", issuer }, { issuer });
   expect(changed.tokens()).toBeUndefined();
   expect(changed.clientInformation({ issuer })?.client_id).toBe("new-dynamic");
-  expect(new OAuthProvider(definition.url, store, () => {}, undefined, options).clientInformation({ issuer })?.client_id).toBe("new-dynamic");
+  expect(new OAuthProvider({ server: "example", url: definition.url }, store, () => {}, options).clientInformation({ issuer })?.client_id).toBe("new-dynamic");
   const publicStore = memoryStore();
-  new OAuthProvider(definition.url, publicStore, undefined, "public").saveTokens({ access_token: "private-token", token_type: "Bearer", issuer });
-  const publicClient = new OAuthProvider(definition.url, publicStore, () => {}, "public", options);
+  new OAuthProvider({ server: "example", url: definition.url, clientId: "public" }, publicStore).saveTokens({ access_token: "private-token", token_type: "Bearer", issuer });
+  const publicClient = new OAuthProvider({ server: "example", url: definition.url, clientId: "public" }, publicStore, () => {}, options);
   expect(() => publicClient.clientInformation({ issuer: "https://replacement.example" })).toThrow("oauth_issuer_changed");
 });
 
@@ -93,7 +93,7 @@ test("occupied custom callback ports fail safely without launching a browser", a
   const occupied = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("occupied") });
   let opened = false;
   try {
-    await expect(authenticate(definition.url, async () => { opened = true; }, undefined, memoryStore(), undefined,
+    await expect(authenticate({ server: "example", url: definition.url }, async () => { opened = true; }, undefined, memoryStore(),
       { oauthCallbackPort: occupied.port })).rejects.toThrow("callback_unavailable");
     expect(opened).toBe(false);
   } finally { await occupied.stop(true); }
@@ -148,7 +148,7 @@ for (const mode of ["browser", "manual", "cancel", "abort", "denied", "wrong-sta
       return callback;
     };
     try {
-      const login = authenticate(`${base}/mcp`, async (target) => {
+      const login = authenticate({ server: "example", url: `${base}/mcp` }, async (target) => {
         expect(mode).toBe("browser");
         const callback = response(target);
         const result = await fetch(callback);
@@ -161,7 +161,7 @@ for (const mode of ["browser", "manual", "cancel", "abort", "denied", "wrong-sta
         expect(html).toContain("Authorization response received");
         expect(html).not.toContain("private-code");
         expect((await fetch(callback)).status).toBe(400);
-      }, controller.signal, store, undefined, {
+      }, controller.signal, store, {
         oauthScopes: ["read", "write"], oauthCallbackPort: callbackPort,
         ...(mode !== "browser" ? { handoff: async (target: string, signal: AbortSignal) => {
           expect(signal.aborted).toBe(false);

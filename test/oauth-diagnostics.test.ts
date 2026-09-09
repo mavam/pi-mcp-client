@@ -35,8 +35,8 @@ test("SDK login without dynamic registration reports a missing client before bro
   try {
     let error: unknown;
     try {
-      await authenticate(`${base}/mcp`, async () => { opened = true; },
-        AbortSignal.timeout(5_000), store, undefined, {
+      await authenticate({ server: "example", url: `${base}/mcp` }, async () => { opened = true; },
+        AbortSignal.timeout(5_000), store, {
           handoff: async () => { handedOff = true; return undefined; },
         });
     } catch (caught) {

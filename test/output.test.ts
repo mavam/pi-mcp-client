@@ -107,7 +107,7 @@ function store(): SecretStore {
 
 test("OAuth credentials bind to server URL and issuer", () => {
   const storage = store();
-  const provider = new OAuthProvider("https://a.example/mcp", storage);
+  const provider = new OAuthProvider({ server: "example", url: "https://a.example/mcp" }, storage);
   provider.saveClientInformation(
     { client_id: "client", issuer: "https://issuer.example" },
     { issuer: "https://issuer.example" },
@@ -122,16 +122,16 @@ test("OAuth credentials bind to server URL and issuer", () => {
   ).toBeUndefined();
   expect(provider.tokens({ issuer: "https://other.example" })).toBeUndefined();
   expect(
-    new OAuthProvider("https://a.example/mcp", storage).tokens()?.access_token,
+    new OAuthProvider({ server: "example", url: "https://a.example/mcp" }, storage).tokens()?.access_token,
   ).toBe("secret");
-  expect(() => new OAuthProvider("https://b.example/mcp", storage)).toThrow(
+  expect(() => new OAuthProvider({ server: "example", url: "https://b.example/mcp" }, storage)).toThrow(
     "Invalid OAuth credential record",
   );
 });
 
 test("OAuth redirect is explicit and transient secrets are not persisted", async () => {
   const storage = store();
-  const provider = new OAuthProvider("https://a.example/mcp", storage);
+  const provider = new OAuthProvider({ server: "example", url: "https://a.example/mcp" }, storage);
   provider.saveCodeVerifier("private-verifier");
   provider.saveTokens({ access_token: "secret", token_type: "Bearer" });
   expect(storage.read()).not.toContain("private-verifier");

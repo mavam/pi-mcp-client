@@ -191,7 +191,7 @@ test("logout accepts disabled servers, preserves configuration, and explains ext
     external: { url: "https://external.example/mcp", headers: { Authorization: "!never-execute" } },
   } });
   const h = await host(configuration, [], async () => store);
-  const provider = new OAuthProvider("https://oauth.example/mcp", store);
+  const provider = new OAuthProvider({ server: "alias", url: "https://oauth.example/mcp" }, store);
   provider.saveTokens({ access_token: "private-token", token_type: "Bearer" });
   await h.command("get alias");
   expect(h.notifications.at(-1)).toContain("stored tokens (validity not checked)");
@@ -206,11 +206,11 @@ test("logout accepts disabled servers, preserves configuration, and explains ext
     await h.execute("mcp_tools", { activate: ["example.echo"] });
     expect(h.activeTools()).toContain("mcp__example__echo");
     await h.command("logout alias");
-    expect(disconnect).toHaveBeenCalledWith(["example", "alias"]);
+    expect(disconnect).toHaveBeenCalledWith(["alias"]);
     expect(record).toBeNull();
     expect(h.notifications.at(-1)).toContain("local OAuth credentials removed");
     expect(h.notifications.at(-1)).toContain("Remote revocation could not be confirmed");
-    expect(h.activeTools()).toEqual(["mcp_tools", "unrelated"]);
+    expect(h.activeTools()).toEqual(["mcp_tools", "unrelated", "mcp__example__echo"]);
     await h.command("logout alias");
     expect(h.notifications.at(-1)).toContain("No stored tokens");
     await h.command("get alias");
@@ -226,21 +226,22 @@ test("logout accepts disabled servers, preserves configuration, and explains ext
   } finally { disconnect.mockRestore(); discover.mockRestore(); }
 });
 
-test("get and logout select only the configured OAuth client identity", async () => {
+test("get and logout isolate names sharing a URL and configured client ID", async () => {
   const stores = new Map<string, { read: () => string | null; write: (value: string) => void; remove: () => void }>();
   const url = "https://clients.example/mcp";
-  for (const clientId of ["first", "second"]) {
+  for (const server of ["first", "second"]) {
     let record: string | null = null;
     const store = { read: () => record, write: (value: string) => { record = value; }, remove: () => { record = null; } };
-    new OAuthProvider(url, store, undefined, clientId).saveTokens({ access_token: "private-token", token_type: "Bearer", issuer: "https://issuer.example" });
-    stores.set(clientId, store);
+    new OAuthProvider({ server, url, clientId: "shared-client" }, store).saveTokens({ access_token: "private-token", token_type: "Bearer", issuer: "https://issuer.example" });
+    stores.set(server, store);
   }
   const h = await host(JSON.stringify({ mcpServers: {
-    first: { url, oauthClientId: "first", disabled: true },
-    second: { url, oauthClientId: "second" },
-  } }), [], async (resolved, clientId) => {
-    expect(resolved).toBe(url);
-    return stores.get(clientId!)!;
+    first: { url, oauthClientId: "shared-client", disabled: true },
+    second: { url, oauthClientId: "shared-client" },
+  } }), [], async (identity) => {
+    expect(identity.url).toBe(url);
+    expect(identity.clientId).toBe("shared-client");
+    return stores.get(identity.server)!;
   });
   await h.command("get first");
   expect(h.notifications.at(-1)).toContain("pre-registered public client");
@@ -290,8 +291,9 @@ test("login uses the effective definition without writing global or project file
     const global = JSON.stringify({ mcpServers: { example: { url: "https://global.example/mcp" } } });
     const project = trusted ? JSON.stringify({ mcpServers: { example: { url: "https://project.example/mcp" } } }) : "untrusted invalid JSON";
     const accessed: string[] = [];
-    const h = await host(global, [], async (url) => {
-      accessed.push(url);
+    const h = await host(global, [], async (identity) => {
+      expect(identity.server).toBe("example");
+      accessed.push(identity.url);
       throw new Error("fixture: stop before network access");
     });
     await writeFile(join(h.directory, ".mcp.json"), project);

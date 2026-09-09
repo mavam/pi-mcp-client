@@ -29,22 +29,22 @@ test("pre-registered client IDs require HTTP OAuth and never execute commands", 
   } finally { delete process.env.MCP_TEST_CLIENT_ID; }
 });
 
-test("credential identities depend only on server URL and configured client", async () => {
+test("credential identities include server name, URL, and configured client", async () => {
   const url = "https://identity.example/mcp";
-  expect(credentialKey(url)).toBe(fingerprint({ url }));
-  expect(new Set([credentialKey(url), credentialKey(url, "one"), credentialKey(url, "two"), credentialKey(`${url}/other`, "one")]).size).toBe(4);
+  expect(credentialKey({ server: "example", url })).toBe(fingerprint({ server: "example", url }));
+  expect(new Set([credentialKey({ server: "example", url }), credentialKey({ server: "example", url, clientId: "one" }), credentialKey({ server: "example", url, clientId: "two" }), credentialKey({ server: "example", url: `${url}/other`, clientId: "one" })]).size).toBe(4);
   const one = memoryStore();
   const two = memoryStore();
-  const provider = new OAuthProvider(url, one, undefined, "one");
+  const provider = new OAuthProvider({ server: "example", url, clientId: "one" }, one);
   provider.saveTokens({ access_token: "private-token", token_type: "Bearer", issuer: "https://issuer.example" });
-  expect(() => new OAuthProvider(url, one, undefined, "two")).toThrow("Invalid OAuth credential record");
-  expect(() => new OAuthProvider(url, one)).toThrow("Invalid OAuth credential record");
-  const second = new OAuthProvider(url, two, undefined, "two");
-  await logout(url, two, undefined, "two");
+  expect(() => new OAuthProvider({ server: "example", url, clientId: "two" }, one)).toThrow("Invalid OAuth credential record");
+  expect(() => new OAuthProvider({ server: "example", url }, one)).toThrow("Invalid OAuth credential record");
+  const second = new OAuthProvider({ server: "example", url, clientId: "two" }, two);
+  await logout({ server: "example", url, clientId: "two" }, two, undefined);
   expect(provider.tokens()?.access_token).toBe("private-token");
   expect(() => second.tokens()).toThrow("authentication_required");
-  const summary = await authenticationSummary({ url, oauthClientId: "one" }, "/", async (resolved, id) => {
-    expect(resolved).toBe(url); expect(id).toBe("one"); return one;
+  const summary = await authenticationSummary("example", { url, oauthClientId: "one" }, "/", async (identity) => {
+    expect(identity).toEqual({ server: "example", url, clientId: "one" }); return one;
   });
   expect(summary).toBe("OAuth (pre-registered public client) · stored tokens (validity not checked)");
   expect(summary).not.toContain("private-token");
@@ -52,7 +52,7 @@ test("credential identities depend only on server URL and configured client", as
 
 test("configured clients stay issuer-bound and cannot be overwritten by dynamic registration", () => {
   const store = memoryStore();
-  const provider = new OAuthProvider("https://binding.example/mcp", store, undefined, "registered-client");
+  const provider = new OAuthProvider({ server: "example", url: "https://binding.example/mcp", clientId: "registered-client" }, store);
   const issuer = "https://issuer.example";
   expect(provider.clientInformation({ issuer })).toEqual({ client_id: "registered-client", issuer });
   expect(store.read()).toBeNull();
@@ -125,26 +125,26 @@ for (const rejectClient of [false, true]) {
     };
     try {
       if (rejectClient) {
-        await expect(authenticate(url, open, AbortSignal.timeout(10_000), store, "registered-client")).rejects.toThrow("oauth_client_rejected");
+        await expect(authenticate({ server: "example", url, clientId: "registered-client" }, open, AbortSignal.timeout(10_000), store)).rejects.toThrow("oauth_client_rejected");
         expect(store.read()).not.toContain("private-error");
-        expect(new OAuthProvider(url, store, undefined, "registered-client").tokens()).toBeUndefined();
+        expect(new OAuthProvider({ server: "example", url, clientId: "registered-client" }, store).tokens()).toBeUndefined();
       } else {
-        const unattended = new OAuthProvider(url, store, undefined, "registered-client");
+        const unattended = new OAuthProvider({ server: "example", url, clientId: "registered-client" }, store);
         await expect(auth(unattended, { serverUrl: url })).rejects.toThrow("authentication_required");
         expect(browserOpens).toBe(0);
-        await authenticate(url, open, AbortSignal.timeout(10_000), store, "registered-client");
+        await authenticate({ server: "example", url, clientId: "registered-client" }, open, AbortSignal.timeout(10_000), store);
         expect(authorizations).toBe(1);
         expect(JSON.parse(store.read()!).clients[base].client_id).toBe("registered-client");
-        const resumed = new OAuthProvider(url, store, undefined, "registered-client");
+        const resumed = new OAuthProvider({ server: "example", url, clientId: "registered-client" }, store);
         expect(await auth(resumed, { serverUrl: url })).toBe("AUTHORIZED");
         expect(refreshes).toBe(1);
         // Explicit login must open the browser even when a refresh token exists.
-        await authenticate(url, open, AbortSignal.timeout(10_000), store, "registered-client");
+        await authenticate({ server: "example", url, clientId: "registered-client" }, open, AbortSignal.timeout(10_000), store);
         expect(browserOpens).toBe(2);
         expect(authorizations).toBe(2);
         expect(refreshes).toBe(1);
         expect(store.read()).not.toContain("private-code");
-        expect(await logout(url, store, undefined, "registered-client")).toBe("confirmed");
+        expect(await logout({ server: "example", url, clientId: "registered-client" }, store, undefined)).toBe("confirmed");
         expect(revoked).toEqual(["private-refresh", "private-access"]);
         expect(store.read()).toBeNull();
       }

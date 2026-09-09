@@ -45,16 +45,16 @@ for (const outcome of ["confirmed", "unsupported", "failure", "issuer-change", "
     base = `http://127.0.0.1:${server.port}`;
     const url = `${base}/mcp`;
     const issuer = outcome === "issuer-change" ? "https://old.example" : base;
-    const old = new OAuthProvider(url, store);
+    const old = new OAuthProvider({ server: "example", url }, store);
     old.saveClientInformation({ client_id: "fixture-client", issuer }, { issuer });
     old.saveTokens({ access_token: "private-access", refresh_token: "private-refresh", token_type: "Bearer", issuer });
     try {
-      const result = await logout(url, store, outcome === "cancelled" ? AbortSignal.abort() : undefined);
+      const result = await logout({ server: "example", url }, store, outcome === "cancelled" ? AbortSignal.abort() : undefined);
       expect(result).toBe(outcome === "confirmed" || outcome === "unsupported" ? outcome : "unconfirmed");
       expect(store.read()).toBeNull();
       expect(() => old.tokens()).toThrow("authentication_required");
       expect(() => old.saveTokens({ access_token: "late-refresh", token_type: "Bearer" })).toThrow("authentication_required");
-      expect(new OAuthProvider(url, store).tokens()).toBeUndefined();
+      expect(new OAuthProvider({ server: "example", url }, store).tokens()).toBeUndefined();
       if (outcome === "confirmed") {
         expect(received.map((body) => body.get("token"))).toEqual(["private-refresh", "private-access"]);
         expect(received.map((body) => body.get("token_type_hint"))).toEqual(["refresh_token", "access_token"]);
@@ -69,19 +69,19 @@ for (const outcome of ["confirmed", "unsupported", "failure", "issuer-change", "
 test("empty and corrupt records can be removed, but removal failures stay failures", async () => {
   const store = memoryStore();
   const url = "https://empty.example/mcp";
-  const pending = new OAuthProvider(url, store);
-  expect(await logout(url, store)).toBe("not-needed");
+  const pending = new OAuthProvider({ server: "example", url }, store);
+  expect(await logout({ server: "example", url }, store)).toBe("not-needed");
   expect(() => pending.saveTokens({ access_token: "late-login", token_type: "Bearer" })).toThrow("authentication_required");
-  expect(await logout(url, store)).toBe("not-needed");
+  expect(await logout({ server: "example", url }, store)).toBe("not-needed");
   store.write("invalid-private-record");
-  expect(await logout(url, store)).toBe("unconfirmed");
+  expect(await logout({ server: "example", url }, store)).toBe("unconfirmed");
   expect(store.read()).toBeNull();
-  await expect(logout(url, { ...store, remove: () => { throw new Error("denied"); } })).rejects.toThrow("denied");
+  await expect(logout({ server: "example", url }, { ...store, remove: () => { throw new Error("denied"); } })).rejects.toThrow("denied");
 });
 
 test("providers cannot reuse or overwrite a credential record changed outside the process", () => {
   const store = memoryStore();
-  const provider = new OAuthProvider("https://external.example/mcp", store);
+  const provider = new OAuthProvider({ server: "example", url: "https://external.example/mcp" }, store);
   provider.saveTokens({ access_token: "private-token", token_type: "Bearer" });
   store.remove();
   expect(() => provider.tokens()).toThrow("authentication_required");
@@ -93,18 +93,21 @@ test("authentication inspection is local, redacted, and distinguishes unavailabl
   const store = memoryStore();
   const url = "https://status.example/mcp";
   let reads = 0;
-  const factory = async (resolved: string) => { expect(resolved).toBe(url); reads++; return store; };
-  expect(await authenticationSummary({ url }, "/", factory)).toContain("no stored tokens");
-  const provider = new OAuthProvider(url, store);
+  const factory: import("../src/auth.js").CredentialStoreFactory = async (identity) => {
+    expect(identity).toEqual({ server: "example", url, clientId: undefined });
+    reads++; return store;
+  };
+  expect(await authenticationSummary("example", { url }, "/", factory)).toContain("no stored tokens");
+  const provider = new OAuthProvider({ server: "example", url }, store);
   provider.saveTokens({ access_token: "private-token", token_type: "Bearer" });
-  expect(await authenticationSummary({ url, headers: { "X-Key": "!never-execute" } }, "/", factory))
+  expect(await authenticationSummary("example", { url, headers: { "X-Key": "!never-execute" } }, "/", factory))
     .toBe("OAuth · stored tokens (validity not checked)");
   store.write("private-malformed-record");
-  expect(await authenticationSummary({ url }, "/", factory)).toBe("OAuth · credential status unavailable");
-  expect(await authenticationSummary({ url }, "/", async () => { throw new Error("private-store-error"); }))
+  expect(await authenticationSummary("example", { url }, "/", factory)).toBe("OAuth · credential status unavailable");
+  expect(await authenticationSummary("example", { url }, "/", async () => { throw new Error("private-store-error"); }))
     .toBe("OAuth · credential status unavailable");
-  expect(await authenticationSummary({ url, headers: { Authorization: "!never-execute" } }, "/", factory)).toContain("externally managed");
-  expect(await authenticationSummary({ command: "never-execute" }, "/", factory)).toContain("Server-managed");
-  expect(await authenticationSummary({ url }, "/", factory)).toBe("OAuth · credential status unavailable");
+  expect(await authenticationSummary("example", { url, headers: { Authorization: "!never-execute" } }, "/", factory)).toContain("externally managed");
+  expect(await authenticationSummary("example", { command: "never-execute" }, "/", factory)).toContain("Server-managed");
+  expect(await authenticationSummary("example", { url }, "/", factory)).toBe("OAuth · credential status unavailable");
   expect(reads).toBe(4);
 });
