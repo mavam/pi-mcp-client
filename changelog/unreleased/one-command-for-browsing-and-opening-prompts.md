@@ -3,7 +3,9 @@ title: One command for browsing and opening prompts
 type: change
 authors:
   - mavam
-created: 2026-09-09T19:55:30.504406Z
+prs:
+  - 26
+created: 2026-09-09T19:57:07.44625Z
 ---
 
 Use `/mcp prompt <server>` to browse prompts, or add a name and arguments to open one directly:
