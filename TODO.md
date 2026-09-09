@@ -35,9 +35,10 @@ and [Claude Code MCP](https://code.claude.com/docs/en/mcp).
   can be read without prior discovery. No manual resource browser is required.
 - [x] **Resource templates:** Discover template metadata and read parameterized
   resources through SDK URI expansion, without inferred argument schemas.
-- [ ] **Resource completions and subscriptions:** Add server-provided argument
-  completions and evaluate explicit subscriptions without silently replacing
-  attached content snapshots.
+- [x] **Resource completions and subscriptions:** Request server-provided template
+  argument completions and explicitly watch resource changes without fetching
+  content or replacing attached snapshots. Watches are connection-local and
+  never restored automatically.
 - [ ] **Prompts:** Discover and run server-provided prompts with argument entry and
   explicit user selection. Treat prompt content as untrusted server data.
 - [ ] **Roots:** Advertise explicitly authorized workspace roots and notify servers

@@ -32,7 +32,7 @@ to inspect the connection. For authenticated services, see [OAuth](#oauth) or
 
 Pi discovers tool and resource metadata, reads selected resources as context,
 and explicitly activates tools before calling them natively. One `mcp_tools`
-tool supports all three operations:
+tool supports discovery, reads, activation, and resource argument completions:
 
 ```js
 // Discover tool and resource metadata. Never reads content or activates tools.
@@ -48,8 +48,9 @@ mcp_tools({ query: "list teams", server: "linear", kind: "tools" })
 mcp_tools({ activate: ["linear.list_teams", "linear.get_team"] })
 ```
 
-Pass exactly one of `query`, `activate`, or `read`. The optional `kind`, `server`,
-and `limit` fields are query-only; reads carry their server inside `read`.
+Pass exactly one of `query`, `activate`, `read`, or `complete`. The optional
+`kind`, `server`, and `limit` fields are query-only; reads and completions carry
+their server inside their respective objects.
 `kind` defaults to `all`, or accepts `tools` and `resources`. Discovery returns up
 to five candidates by default, or up to 50 with `limit`, across both kinds.
 
@@ -75,7 +76,8 @@ can never become an active tool. Previously loaded tools remain available.
 `mcp_tools` replaces `mcp_search` without backward compatibility. Update explicit
 Pi tool allowlists to use `mcp_tools` and activate the tools you need again in
 existing sessions. The UI labels discovery calls **mcp discover**, activation
-calls **mcp activate**, and resource reads **mcp read**.
+calls **mcp activate**, resource reads **mcp read**, and argument completions
+**mcp complete**.
 
 ### Read resources as context
 
@@ -151,7 +153,62 @@ Expanded output includes the template, supplied arguments, and resource content.
 The same authorization, cancellation, output limits, and snapshot rules apply.
 Template catalogs are memory-only, expire after five minutes, and are invalidated
 with resource metadata. Argument data is limited to 64 KiB and expanded URIs to
-4,096 characters. Argument completions and subscriptions aren't implemented.
+4,096 characters.
+
+### Complete resource arguments
+
+Ask the server for suggested values for one advertised template variable:
+
+```js
+mcp_tools({
+  complete: {
+    server: "warehouse",
+    template: "schema://tables/{table}",
+    argument: { name: "table", value: "ev" }
+  }
+})
+```
+
+`value` is the current prefix and can be empty. For dependent suggestions, add
+`arguments: { knownVariable: "value" }` inside `complete`. These context values
+must be strings, not arrays. The server must advertise completion support and
+the exact template; the variable must occur in that template.
+
+The result contains `values` and, when supplied by the server, `total` and
+`hasMore`. Narrow the prefix when more matches are available. Suggestions are
+untrusted server data, not a required-field schema or instructions. Completion
+never reads resources, activates tools, or chooses a value automatically. Use
+`complete` alone, without query, activation, read, or search options. Requests
+are limited to 64 KiB; output uses the same 2,000-line / 50 KiB limit and private
+spill files as other results.
+
+### Watch resource changes
+
+Subscriptions are explicit user commands, not model-facing tool operations:
+
+```text
+/mcp subscribe warehouse schema://tables/events
+/mcp subscriptions
+/mcp unsubscribe warehouse schema://tables/events
+```
+
+Use an exact absolute URI from discovery, a template read, or a resource link.
+The configured server must support resource subscriptions. Pi uses the SDK's
+negotiated protocol: legacy resource subscriptions or modern filtered streams.
+It never opens the URI as a file or generic URL.
+
+An update marks the watch as changed (`↻`) and shows a UI notification. Repeated
+updates coalesce into that marker until you unsubscribe. No content is fetched,
+no model turn starts, and existing attachments remain unchanged. Read explicitly
+for a new snapshot; unsubscribe and subscribe again to reset the change marker.
+
+Watches are memory-only, limited to 50 per server connection, and require an
+interactive UI (TUI or RPC). Repeating a subscribe command is idempotent. Session
+replacement, tree navigation, configuration reload, disconnection, and exit
+clear the affected watches. They are never restored or automatically retried;
+use `/mcp subscriptions` to inspect currently active watches. Cancellation and
+connection failures can leave an uncertain server-side outcome; cleanup is
+best-effort.
 
 ### Result display
 
@@ -197,6 +254,9 @@ not the displayed link label.
 | `/mcp logout <server>` | Remove local OAuth credentials and attempt remote revocation, including for disabled servers. |
 | `/mcp reconnect <server>` | Replace a connection and refresh its catalog. |
 | `/mcp refresh <server>` | Refresh tool and resource metadata without reading resources or loading additional tools. |
+| `/mcp subscribe <server> <uri>` | Watch changes to one exact resource URI without fetching content. |
+| `/mcp unsubscribe <server> <uri>` | Stop watching one resource. |
+| `/mcp subscriptions` | List active resource watches and their change markers. |
 
 The status matrix uses glyphs to distinguish idle (`○`), connected (`●`),
 connecting (`▶︎`), disabled (`○`), and failed (`✘︎`) servers. Idle is normal:
@@ -660,6 +720,10 @@ unavailable server is not an empty catalog.
 | `resource_invalid` | Use an exact absolute resource URI from discovery or a tool-returned link. |
 | `resource_not_found` | Refresh resource metadata or obtain a new link. |
 | `resources_unsupported` | Use the server's tools instead, or choose a resource-capable server. |
+| `completions_unsupported` | Supply known template values or ask for them. |
+| `completion_invalid` | Use an advertised template variable and a string prefix. |
+| `subscriptions_unsupported` | Choose a server with subscription support, or read explicitly when needed. |
+| `subscription_limit` | Remove a watch before adding another; the limit is 50 per connection. |
 | `catalog_changed` | Retry discovery after the server catalog settles. |
 | `oauth_failed` | Browser access to the callback and support for public clients, using dynamic registration or the configured client ID. |
 | `oauth_issuer_changed` | Verify the authorization-server change before logging out and logging in again. |

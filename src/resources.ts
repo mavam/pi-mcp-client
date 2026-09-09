@@ -18,6 +18,25 @@ export function validTemplateRead(value: Record<string, unknown>): boolean {
   try { return validResourceUri(new UriTemplate(value.template).expand(value.arguments as Variables)); }
   catch { return false; }
 }
+export interface CompletionTarget {
+  server: string;
+  template: string;
+  argument: { name: string; value: string };
+  arguments?: Record<string, string>;
+}
+
+export function validCompletion(value: unknown): value is CompletionTarget {
+  if (!object(value) || typeof value.server !== "string" || !/^[A-Za-z0-9_-]{1,80}$/.test(value.server) ||
+      !validTemplate(value.template) || !object(value.argument) ||
+      typeof value.argument.name !== "string" || !value.argument.name || value.argument.name.length > 512 ||
+      typeof value.argument.value !== "string" || value.argument.value.length > 4096 ||
+      Object.keys(value.argument).some((key) => !["name", "value"].includes(key)) ||
+      Object.keys(value).some((key) => !["server", "template", "argument", "arguments"].includes(key))) return false;
+  if (value.arguments !== undefined && (!object(value.arguments) || Object.keys(value.arguments).length > 100 ||
+      !Object.entries(value.arguments).every(([key, item]) => key.length <= 512 && typeof item === "string" && item.length <= 4096))) return false;
+  return Buffer.byteLength(JSON.stringify(value)) <= 64 * 1024;
+}
+
 export interface CatalogResource extends ResourceTarget {
   name: string;
   title?: string;

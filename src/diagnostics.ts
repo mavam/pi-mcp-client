@@ -26,6 +26,10 @@ const messages = {
   resource_invalid: "The resource URI is invalid.",
   resource_not_found: "The resource is no longer available or was not found.",
   resources_unsupported: "The server does not advertise resource access.",
+  completions_unsupported: "The server does not advertise argument completions.",
+  completion_invalid: "The resource completion arguments are invalid.",
+  subscriptions_unsupported: "The server did not accept resource subscriptions.",
+  subscription_limit: "The connection has reached its limit of 50 resource subscriptions.",
   catalog_changed: "The catalog kept changing during discovery.",
   oauth_failed: "OAuth authentication did not complete.",
   oauth_issuer_changed: "The OAuth authorization server changed.",
@@ -40,6 +44,8 @@ export type Operation =
   | "search"
   | "call"
   | "read"
+  | "complete"
+  | "subscribe"
   | "auth"
   | "reconnect"
   | "refresh";
@@ -96,6 +102,10 @@ export function diagnostic(
     resource_invalid: "Use an exact absolute resource URI from discovery or a tool-returned resource link.",
     resource_not_found: `Refresh with /mcp refresh ${target}, or obtain a new resource link.`,
     resources_unsupported: "Use this server's tools instead, or select a server with resource support.",
+    completions_unsupported: "Supply known template values or ask the user for them.",
+    completion_invalid: "Use an advertised resource template and one of its variable names, with a string prefix and optional known string arguments.",
+    subscriptions_unsupported: "Choose a server with resource subscription support, or read the resource explicitly when needed.",
+    subscription_limit: "Unsubscribe from another resource before adding a new watch.",
     catalog_changed: "Retry discovery once the server catalog has settled.",
     oauth_failed: `Check OAuth support, the configured public client ID, and callback access. Retry /mcp login ${target}, or use /mcp login ${target} --no-browser for manual callback handoff.`,
     oauth_issuer_changed: `Verify the server configuration before running /mcp logout ${target} and /mcp login ${target} to trust the new authorization server.`,
