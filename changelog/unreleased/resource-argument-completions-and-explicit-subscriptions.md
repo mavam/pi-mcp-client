@@ -3,6 +3,8 @@ title: Resource argument completions and explicit subscriptions
 type: feature
 authors:
   - mavam
+prs:
+  - 17
 created: 2026-09-09T10:16:25.834578Z
 ---
 
