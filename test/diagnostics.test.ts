@@ -1,5 +1,9 @@
 import { expect, test } from "bun:test";
 import {
+  OAuthError,
+  OAuthClientFlowError,
+  RegistrationRejectedError,
+  InsecureTokenEndpointError,
   SdkError,
   SdkErrorCode,
   UnauthorizedError,
@@ -13,6 +17,63 @@ import {
 } from "../src/diagnostics.js";
 
 const context = { server: "example", operation: "connect", oauth: true } as const;
+
+const authContext = { server: "slack", operation: "auth" } as const;
+const missingRegistration = "Incompatible auth server: does not support dynamic client registration";
+
+test("OAuth diagnostics identify actionable causes without exposing SDK payloads", () => {
+  for (const [error, code] of [
+    [new Error(missingRegistration), "oauth_client_required"],
+    [new Error("Incompatible auth server: does not support code challenge method S256"), "oauth_pkce_unsupported"],
+    [new Error("client_secret_basic authentication requires a client_secret"), "oauth_client_rejected"],
+    [new OAuthError("invalid_client", "secret-token", "https://private.example"), "oauth_client_rejected"],
+    [new OAuthError("unauthorized_client", "secret-token"), "oauth_client_rejected"],
+    [new OAuthError("invalid_scope", "secret-token"), "oauth_scope_rejected"],
+    [new OAuthError("insufficient_scope", "secret-token"), "oauth_scope_rejected"],
+    [new OAuthError("invalid_grant", "secret-token"), "oauth_grant_rejected"],
+    [new OAuthError("invalid_redirect_uri", "secret-token"), "oauth_redirect_rejected"],
+    [new OAuthError("access_denied", "secret-token"), "permission_denied"],
+    [new InsecureTokenEndpointError("http://private.example/secret-token"), "oauth_endpoint_insecure"],
+    [new RegistrationRejectedError({
+      status: 400,
+      body: "secret-token",
+      submittedMetadata: { redirect_uris: ["https://private.example"] },
+    }), "oauth_registration_rejected"],
+    [new OAuthClientFlowError("secret-token"), "oauth_failed"],
+    [new OAuthError("secret-token", "secret-token"), "oauth_failed"],
+  ] as const) {
+    for (const wrapped of [error, new Error("private wrapper", { cause: error })]) {
+      const result = diagnose(wrapped, authContext);
+      expect(result.code).toBe(code);
+      expect(result.server).toBe("slack");
+      expect(JSON.stringify(result)).not.toMatch(/secret-token|private\.example|private wrapper/);
+      expect(diagnose(new DiagnosticError(result), authContext)).toEqual(result);
+    }
+  }
+  const result = diagnose(new Error(missingRegistration), authContext);
+  expect(result.hint).toContain("oauthClientId");
+  expect(result.hint).toContain("/mcp get slack");
+  expect(result.hint).toContain("/mcp reload and /mcp login slack");
+});
+
+test("OAuth message fallbacks are exact, contextual, and never echo unknown errors", () => {
+  for (const error of [
+    new Error(`${missingRegistration}: secret-token`),
+    new TypeError(missingRegistration),
+    new OAuthError("unknown", missingRegistration),
+    new Error("secret-token"),
+  ]) {
+    const result = diagnose(error, authContext);
+    expect(result.code).toBe("oauth_failed");
+    expect(result.hint).not.toContain("--no-browser");
+    expect(JSON.stringify(result)).not.toContain("secret-token");
+  }
+  expect(diagnose(new Error(missingRegistration), { operation: "call" }).code).toBe("operation_failed");
+  expect(diagnose(new Error(missingRegistration), context).code).toBe("oauth_client_required");
+  expect(diagnose(new Error(missingRegistration), {
+    ...authContext, signal: AbortSignal.abort(),
+  }).code).toBe("cancelled");
+});
 
 test("diagnostics classify SDK and OS failures without echoing error payloads", () => {
   for (const [error, code] of [

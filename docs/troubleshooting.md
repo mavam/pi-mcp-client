@@ -37,12 +37,27 @@ unavailable server isn't an empty catalog.
 | `subscriptions_unsupported` | Choose a server with subscription support, or ask the assistant to read when needed. |
 | `subscription_limit` | Remove a watch before adding another; the limit is 50 per connection. |
 | `catalog_changed` | Ask the assistant to retry discovery after the server catalog settles. |
-| `oauth_failed` | Browser access to the callback and support for public clients, using dynamic registration or the configured client ID. |
+| `oauth_failed` | An unclassified OAuth failure. Check the service's requirements and `/mcp get <server>` for the client type, scopes, and callback URL. Only public/PKCE clients are supported, not clients requiring a secret. |
+| `oauth_client_required` | The server doesn't support dynamic registration. Configure `oauthClientId` for a registered public/PKCE client and register the exact callback URL. Reload, then log in again. |
+| `oauth_registration_rejected` | The server rejected dynamic registration. Check public/native client eligibility and the callback URL, or configure an approved public client ID. |
+| `oauth_client_rejected` | Check the client ID, app approval, and public-client authentication (token endpoint method `none`). A rejected client doesn't necessarily mean a client secret is required. |
+| `oauth_pkce_unsupported` | The authorization server must support S256 PKCE. Login without PKCE isn't supported. |
+| `oauth_scope_rejected` | Check `oauthScopes` against the service's allowed scopes and app permissions. Reload after changes, then log in again. |
+| `oauth_grant_rejected` | Log in again for a fresh code. If it still fails, check the client and exact callback URL. |
+| `oauth_redirect_rejected` | Register the exact callback host, port, and `/callback` path shown by `/mcp get <server>`. Manual login uses the same callback URL. |
+| `oauth_endpoint_insecure` | The token endpoint must use HTTPS unless it is on loopback. Don't disable TLS verification. |
 | `oauth_issuer_changed` | Verify the authorization-server change before logging out and logging in again. |
 | `callback_unavailable` | Another process using the configured loopback port (default 19847). Change `oauthCallbackPort` or use `/mcp login <server> --no-browser`. |
 | `busy` | Wait for discovery to finish before reconnecting. |
 | `cancelled` | Retry when ready; verify any interrupted tool operation first. |
 | `operation_failed` | An unclassified failure; inspect server status and configuration. |
+
+If login fails before opening a browser, check client registration first.
+For Slack, see [Slack setup requirements](authentication.md#slack-setup-requirements).
+Use `--no-browser` for browser launch or callback reachability problems, not
+registration failures. Diagnostics use known failure categories rather than
+printing server error descriptions, which can contain credentials or private URLs.
+An unknown error remains `oauth_failed`; it doesn't prove a callback problem.
 
 For setup details, see [Configuration](configuration.md),
 [Authentication](authentication.md), and [Commands](commands.md).
