@@ -29,24 +29,10 @@ uvx lefthook install
 Pushing runs the quality gates automatically. To run them manually, use
 `uvx lefthook run pre-push`.
 
-## Compatibility and surface area
-
-This is an early-stage project. Backwards compatibility is not a goal; use
-semantic versioning and breaking-change release notes to communicate changes.
-
-- Prefer the smallest coherent interface over preserving existing behavior.
-- Remove superseded options, aliases, formats, and code paths outright. Don't add
-  compatibility shims, deprecation modes, automatic migrations, or dual paths
-  solely to support older project versions.
-- Don't preserve old session, cache, or credential formats. Reject unsupported
-  data safely; users can rediscover tools or sign in again.
-- Document required user actions in the relevant guide and changelog.
-- Keep current MCP interoperability in the official SDK. Protocol negotiation,
-  validation of untrusted data, and graceful error handling aren't project-version
-  compatibility shims.
-
 ## Development
 
+- No backwards compatibility. Use semantic versioning for breaking changes.
+- Keep the surface area minimal; remove superseded options and code paths.
 - Use Bun: `bun install`, `bun run check`, and `bun run build`.
 - Keep protocol and transport behavior in the official MCP SDK.
 - Keep one model-facing `mcp_tools` tool: `{query, kind?, server?, limit?}` discovers
