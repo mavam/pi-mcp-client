@@ -3,7 +3,20 @@
 This repository contains **pi-mcp-client**, a pi extension for discovering MCP
 tools on demand and calling them natively through the official MCP SDK.
 
-See `README.md` for user-facing documentation.
+## Documentation
+
+- [README.md](README.md): Short human quickstart and guide index.
+- [Configuration](docs/configuration.md): Server definitions, filters, secret commands, and reload behavior.
+- [Authentication](docs/authentication.md): OAuth setup, credential lifecycle, and remote login.
+- [Commands](docs/commands.md): Human-operated `/mcp` commands and resource watches.
+- [Tool reference](docs/tool-reference.md): The assistant's `mcp_tools` interface and examples.
+- [Behavior](docs/behavior.md): Sessions, caching, result display, trust, and permissions.
+- [Troubleshooting](docs/troubleshooting.md): Diagnostics, recovery, and output limits.
+
+Update the relevant guide when behavior changes. Keep the README concise and
+human-facing; put model tool-call examples in the tool reference. Distinguish
+what the user controls, what the assistant calls, and what the extension does.
+Link to shared details rather than duplicating them across guides.
 
 ## Setup
 
