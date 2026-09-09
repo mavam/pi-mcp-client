@@ -43,7 +43,7 @@ export function commandWords(input: string): string[] {
   return words;
 }
 
-export function parseConfigCommand(input: string): Exclude<ConfigMutation, { action: "toggle" }> | undefined {
+export function parseConfigCommand(input: string): Extract<ConfigMutation, { action: "add" | "remove" }> | undefined {
   const action = input.trimStart().split(/\s/u, 1)[0];
   if (action !== "add" && action !== "remove") return undefined;
   const words = commandWords(input);

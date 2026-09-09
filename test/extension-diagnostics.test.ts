@@ -264,6 +264,27 @@ test("logout reports store failures without claiming success or exposing raw err
   expect(h.notifications.at(-1)).not.toContain("private-keyring-error");
 });
 
+test("login refuses header authentication, disabled servers, and headless use without changing configuration", async () => {
+  for (const definition of [
+    { url: "https://example.com/mcp", headers: { aUtHoRiZaTiOn: "!never-execute" } },
+    { url: "https://example.com/mcp", disabled: true },
+    { url: "https://example.com/mcp" },
+  ]) {
+    let accesses = 0;
+    const configuration = JSON.stringify({ mcpServers: { example: definition } });
+    const h = await host(configuration, [], async () => { accesses++; throw new Error("unexpected access"); });
+    if (!definition.headers && !definition.disabled) {
+      h.ctx.hasUI = false;
+      await expect(h.command("login example")).rejects.toThrow("interactive session");
+    } else {
+      await h.command("login example");
+      expect(h.notifications.at(-1)).toContain(definition.headers ? "Authorization header" : "Disabled servers");
+    }
+    expect(accesses).toBe(0);
+    expect(await readFile(join(h.directory, "mcp.json"), "utf8")).toBe(configuration);
+  }
+});
+
 test("manual login validates syntax and refuses non-interactive use before credentials", async () => {
   let accesses = 0;
   const h = await host(JSON.stringify({ mcpServers: { example: { url: "https://example.com/mcp", oauth: true } } }), [], async () => {
@@ -281,8 +302,8 @@ test("manual login validates syntax and refuses non-interactive use before crede
     .toEqual([{ value: "login example --no-browser", label: "--no-browser" }]);
 });
 
-for (const outcome of ["success", "cancel", "shutdown"] as const) {
-  test(`manual login keeps callbacks in dialogs and handles ${outcome}`, async () => {
+for (const configured of [true, false]) for (const outcome of ["success", "cancel", "shutdown"] as const) {
+  test(`manual login keeps callbacks in dialogs and handles ${outcome} (OAuth configured: ${configured})`, async () => {
     let base = "";
     let record: string | null = null;
     let tokenRequests = 0;
@@ -292,7 +313,8 @@ for (const outcome of ["success", "cancel", "shutdown"] as const) {
         return Response.json({ resource: `${base}/mcp`, authorization_servers: [base] });
       if (path === "/.well-known/oauth-authorization-server")
         return Response.json({ issuer: base, authorization_endpoint: `${base}/authorize`, token_endpoint: `${base}/token`,
-          response_types_supported: ["code"], token_endpoint_auth_methods_supported: ["none"], code_challenge_methods_supported: ["S256"] });
+          response_types_supported: ["code"], registration_endpoint: `${base}/register`, token_endpoint_auth_methods_supported: ["none"], code_challenge_methods_supported: ["S256"] });
+      if (path === "/register") return Response.json({ ...await request.json() as object, client_id: "dynamic-public" }, { status: 201 });
       if (path === "/token") {
         tokenRequests++;
         return Response.json({ access_token: "private-token", token_type: "Bearer" });
@@ -301,7 +323,7 @@ for (const outcome of ["success", "cancel", "shutdown"] as const) {
     } });
     base = `http://127.0.0.1:${server.port}`;
     cleanup.push(async () => { await server.stop(true); });
-    const h = await host(JSON.stringify({ mcpServers: { example: { url: `${base}/mcp`, oauth: true, oauthClientId: "public", oauthScopes: ["read"], oauthCallbackPort: 19848 } } }), [], async () => ({
+    const h = await host(JSON.stringify({ mcpServers: { example: { url: `${base}/mcp`, ...(configured ? { oauth: true, oauthClientId: "public", oauthScopes: ["read"], oauthCallbackPort: 19848 } : {}) } } }), [], async () => ({
       read: () => record, write: (value) => { record = value; }, remove: () => { record = null; },
     }));
     const reconnect = spyOn(McpRuntime.prototype, "reconnect").mockResolvedValue(undefined);
@@ -309,7 +331,7 @@ for (const outcome of ["success", "cancel", "shutdown"] as const) {
     let prompts = 0;
     Object.assign(h.ctx.ui, { input: async (title: string, placeholder: string, options: { signal: AbortSignal }) => {
       prompts++;
-      expect(title).toContain("Requested scopes: read");
+      expect(title).toContain(`Requested scopes: ${configured ? "read" : "SDK/server defaults"}`);
       expect(placeholder).toBe("Callback URL");
       if (outcome === "cancel") return undefined;
       if (outcome === "shutdown") {
@@ -324,6 +346,7 @@ for (const outcome of ["success", "cancel", "shutdown"] as const) {
       return callback.href;
     } });
     await h.command("login example --no-browser");
+    expect(JSON.parse(await readFile(join(h.directory, "mcp.json"), "utf8")).mcpServers.example.oauth).toBe(true);
     expect(prompts).toBe(1);
     expect(tokenRequests).toBe(outcome === "success" ? 1 : 0);
     expect(reconnect).toHaveBeenCalledTimes(outcome === "success" ? 1 : 0);
@@ -344,7 +367,7 @@ test("removed command names fail without connecting and login uses the new name"
       expect(h.commands.get("mcp").getArgumentCompletions(action)).toEqual([]);
     }
     await h.command("login example");
-    expect(h.notifications.at(-1)).toContain("Enable oauth");
+    expect(h.notifications.at(-1)).toContain("HTTP server");
     expect(connect).not.toHaveBeenCalled();
   } finally {
     connect.mockRestore();

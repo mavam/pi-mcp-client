@@ -120,7 +120,7 @@ server definition:
 | Field | Purpose |
 | --- | --- |
 | `description` | Short capability description for the assistant's server directory. |
-| `oauth` | Set to `true` to use OAuth instead of an Authorization header on an HTTP connection. |
+| `oauth` | Set to `true` to use OAuth instead of an Authorization header on an HTTP connection. `/mcp login <server>` enables this automatically. |
 | `oauthClientId` | Optional pre-registered public client ID. Requires `oauth: true`; supports `${ENV_VAR}` interpolation, not secret commands. |
 | `oauthScopes` | Optional array of 1–100 unique OAuth scope tokens to request at login. Requires `oauth: true`; omitted scopes use SDK/server defaults. Values are literal, without interpolation. |
 | `oauthCallbackPort` | Optional loopback callback port, from 1 to 65535. Defaults to `19847`. Requires `oauth: true`. |

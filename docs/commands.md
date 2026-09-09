@@ -18,7 +18,7 @@ separate interface is documented in the [tool reference](tool-reference.md).
 | `/mcp reload` | Apply configuration changes without restarting Pi. |
 | `/mcp enable <server>` | Enable a server in its effective configuration file. |
 | `/mcp disable <server>` | Disable a server, close its connection, and deactivate its tools. |
-| `/mcp login <server> [--no-browser]` | Authenticate an OAuth-enabled HTTP server; optionally paste the callback URL in an interactive dialog. |
+| `/mcp login <server> [--no-browser]` | Enable OAuth and authenticate an HTTP server; optionally paste the callback URL in an interactive dialog. |
 | `/mcp logout <server>` | Remove local OAuth credentials and attempt remote revocation, including for disabled servers. |
 | `/mcp reconnect <server>` | Replace a connection and refresh its catalog. |
 | `/mcp refresh <server>` | Refresh tool and resource metadata without reading resources or loading additional tools. |
