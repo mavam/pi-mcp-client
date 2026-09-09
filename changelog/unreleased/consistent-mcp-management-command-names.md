@@ -1,6 +1,8 @@
 ---
 title: Consistent MCP management command names
 type: breaking
+prs:
+  - 10
 authors:
   - mavam
 created: 2026-09-09T05:34:44.32975Z
