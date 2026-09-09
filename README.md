@@ -66,12 +66,6 @@ Detailed guides:
 - An available OS credential store for OAuth. Linux requires a working Secret
   Service/keyring session.
 
-## 🧹 Uninstall
-
-```sh
-pi remove npm:pi-mcp-client
-```
-
 ## 📄 License
 
 [MIT](LICENSE)
