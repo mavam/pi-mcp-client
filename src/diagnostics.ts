@@ -63,8 +63,8 @@ export function diagnostic(
     configuration_invalid:
       "Check mcpServers in mcp.json / .mcp.json, including inline server options and environment variables. Move options from any top-level pi section into mcpServers.<server>. Reload Pi after editing.",
     authentication_required: context.oauth
-      ? `Run /mcp auth ${target}.`
-      : "Check the Authorization header, or enable mcpServers.<server>.oauth and authenticate with /mcp auth <server>.",
+      ? `Run /mcp login ${target}.`
+      : "Check the Authorization header, or enable mcpServers.<server>.oauth and authenticate with /mcp login <server>.",
     permission_denied:
       "Check the account's permissions, OAuth scopes, and service access policy.",
     credential_store_unavailable:
@@ -85,7 +85,7 @@ export function diagnostic(
       "Check server filters and use mcp_tools with activate and the exact identifier to activate the current tool definition. Reload Pi if the connection configuration changed.",
     tool_error:
       "Review the server's tool result and inputs. Verify the outcome before retrying.",
-    oauth_failed: `Check OAuth support and browser access to the local callback, then run /mcp auth ${target}.`,
+    oauth_failed: `Check OAuth support and browser access to the local callback, then run /mcp login ${target}.`,
     callback_unavailable: "Free local port 19847, then retry authentication.",
     busy: "Wait for discovery to finish, then retry.",
     operation_failed:

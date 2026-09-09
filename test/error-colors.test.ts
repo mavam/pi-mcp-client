@@ -47,7 +47,7 @@ test("discovery diagnostics keep the server red and explanation dim", () => {
   const { theme, calls, boldCalls } = recordingTheme();
   const label = "cloudflare";
   const inlineDescription = "Authentication is required.";
-  const inlineAction = "Run /mcp auth cloudflare.";
+  const inlineAction = "Run /mcp login cloudflare.";
   for (const expanded of [false, true]) {
     const component = renderResult({
       content: [],

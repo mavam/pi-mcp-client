@@ -5,6 +5,29 @@ Streamable HTTP. This is a prioritized backlog, not a promise that every feature
 will ship or a schedule for v0.2. MCP capabilities are negotiated and optional;
 not every server or client needs all of them.
 
+## CLI parity with Codex and Claude Code
+
+Use familiar command names without copying client-specific behavior. Inspection
+stays redacted, discovery never activates tools, and authentication stays explicit.
+
+- [x] **Command terminology:** Use `/mcp list`, `/mcp get <server>`, and
+  `/mcp login <server>`. The former `inspect` and `auth` names are not aliases.
+- [ ] **Credential lifecycle (next):** Add `/mcp logout <server>` and safe
+  authentication status in `/mcp get`, including disabled servers. Preserve
+  configuration, distinguish local removal from remote revocation, and explain
+  externally managed credentials without changing them.
+- [ ] **Pre-registered OAuth clients (following):** Support an explicitly configured
+  client ID for servers without dynamic registration, preserving issuer binding
+  and OS-backed credentials.
+- [ ] **Configuration commands:** Add explicit `/mcp add` and `/mcp remove`
+  operations with scope selection and validation. Adding must not execute a server;
+  removing configuration must be distinct from logout and disabling.
+- [ ] **OAuth options:** Evaluate requested scopes, configurable callback ports,
+  and browser-free callback handoff. Keep non-interactive refusal explicit.
+
+References: [Codex CLI](https://developers.openai.com/codex/cli/reference#codex-mcp)
+and [Claude Code MCP](https://code.claude.com/docs/en/mcp).
+
 ## High priority: broader server compatibility
 
 - [ ] **Resources:** List, search, and read resources; expand resource templates;

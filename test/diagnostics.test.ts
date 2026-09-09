@@ -54,7 +54,7 @@ test("local diagnostics survive wrapping and provide authentication-specific hin
   expect(result.server).toBe("example");
   expect(diagnose(new DiagnosticError(result), context)).toEqual(result);
   expect(diagnose(new UnauthorizedError(), context).hint).toBe(
-    "Run /mcp auth example.",
+    "Run /mcp login example.",
   );
   expect(
     diagnose(new UnauthorizedError(), { ...context, oauth: false }).hint,
