@@ -6,7 +6,8 @@ import {
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { loadConfig, setServerDisabled, resolveServer, allowed, object, type Config } from "./config.js";
+import { loadConfig, updateServerConfig, ConfigMutationError, resolveServer, allowed, object, type Config, type ConfigMutation } from "./config.js";
+import { parseConfigCommand, configCommandCompletions } from "./config-commands.js";
 import { authenticationSummary, oauthSettings, inspectServer, inspectTool, serverMatrix, toolPickerLabel } from "./management.js";
 import {
   DEFAULT_SEARCH_LIMIT,
@@ -136,9 +137,21 @@ export default function mcpClient(
     exposure.restore(tools);
   };
 
-  async function reloadConfiguration(
+  let configurationQueue: Promise<unknown> = Promise.resolve();
+  function reloadConfiguration(ctx: ExtensionContext, mutation?: ConfigMutation) {
+    const generation = sessionGeneration;
+    const update = configurationQueue.then(() => {
+      if (generation !== sessionGeneration)
+        throw new CommandUsageError("The Pi session changed while waiting to update configuration.");
+      return applyConfiguration(ctx, mutation);
+    });
+    configurationQueue = update.catch(() => {});
+    return update;
+  }
+
+  async function applyConfiguration(
     ctx: ExtensionContext,
-    toggle?: { server: string; disabled: boolean },
+    mutation?: ConfigMutation,
   ) {
     // Validate before changing disk or replacing a working setup. Secrets stay lazy.
     const generation = sessionGeneration;
@@ -151,8 +164,8 @@ export default function mcpClient(
       }
     };
     ctx.signal?.throwIfAborted();
-    const update = toggle && await setServerDisabled(
-      agentDir, ctx.cwd, ctx.isProjectTrusted(), toggle.server, toggle.disabled, validate,
+    const update = mutation && await updateServerConfig(
+      agentDir, ctx.cwd, ctx.isProjectTrusted(), mutation, validate,
     );
     const nextConfig = update ? update.config : await loadConfig(agentDir, ctx.cwd, ctx.isProjectTrusted());
     validate(nextConfig);
@@ -376,13 +389,15 @@ export default function mcpClient(
 
   pi.registerCommand("mcp", {
     description:
-      "Manage MCP servers: list, status, reload, enable|disable|get|tools|login|logout|reconnect|refresh <server>",
+      "Manage MCP servers: add|remove --scope global|project, list, status, reload, enable|disable|get|tools|login|logout|reconnect|refresh <server>",
     getArgumentCompletions(prefix) {
       const serverActions = ["enable", "disable", "get", "tools", "login", "logout", "reconnect", "refresh"];
       const input = prefix.trimStart();
+      const configuration = configCommandCompletions(input, Object.keys(config));
+      if (configuration !== undefined) return configuration;
       const match = /^(\S+)\s+(.*)$/s.exec(input);
       if (!match) {
-        return ["list", "status", "reload", ...serverActions]
+        return ["list", "status", "reload", "add", "remove", ...serverActions]
           .filter((action) => action.startsWith(input))
           .map((action) => ({ value: action, label: action }));
       }
@@ -400,13 +415,29 @@ export default function mcpClient(
     async handler(args, ctx) {
       const generation = sessionGeneration;
       await ctx.waitForIdle();
-      const [action = "status", server, ...extra] = args
+      let [action = "status", server, ...extra] = args
         .trim()
         .split(/\s+/)
         .filter(Boolean);
       try {
         if (generation !== sessionGeneration)
           throw new CommandUsageError("The Pi session changed while waiting for idle.");
+        const mutation = parseConfigCommand(args);
+        if (mutation) {
+          server = mutation.server;
+          await reloadConfiguration(ctx, mutation);
+          const remaining = Object.hasOwn(config, server);
+          const message = mutation.action === "add"
+            ? `✔︎ ${server}: saved in ${mutation.scope} configuration. Connections, authentication, and tool discovery remain on demand.` +
+              (mutation.scope === "global" && ctx.isProjectTrusted()
+                ? " Trusted project definitions take precedence over global definitions." : "")
+            : `✔︎ ${server}: removed from ${mutation.scope} configuration. Credentials were retained.` +
+              (remaining
+                ? " A definition from the other scope remains effective; connections reopen on demand."
+                : " Its connection is closed and its tools are no longer active.");
+          if (ctx.hasUI) ctx.ui.notify(message, "info");
+          return;
+        }
         if (action === "reload" && !server) {
           await reloadConfiguration(ctx);
           if (ctx.hasUI)
@@ -420,7 +451,7 @@ export default function mcpClient(
           (action === "enable" || action === "disable") &&
           server && !extra.length && Object.hasOwn(config, server)
         ) {
-          const scope = await reloadConfiguration(ctx, { server, disabled: action === "disable" });
+          const scope = await reloadConfiguration(ctx, { action: "toggle", server, disabled: action === "disable" });
           if (ctx.hasUI)
             ctx.ui.notify(
               `✔︎ ${server}: ${action === "enable" ? "enabled" : "disabled"} in ${scope} configuration. ` +
@@ -500,7 +531,7 @@ export default function mcpClient(
           config[server].disabled
         )
           throw new CommandUsageError(
-            "Usage: /mcp list|status|reload or /mcp enable|disable|get|tools|login|logout|reconnect|refresh <server>. Disabled servers accept enable, disable, get, and logout.",
+            "Usage: /mcp list|status|reload, /mcp enable|disable|get|tools|login|logout|reconnect|refresh <server>, or /mcp add|remove --scope global|project ... . Disabled servers accept enable, disable, get, logout, and scoped removal.",
           );
         if (action === "tools") {
           if (!ctx.hasUI)
@@ -579,7 +610,7 @@ export default function mcpClient(
         else if (action === "refresh") await current().catalog(server, ctx.signal, true);
         else
           throw new CommandUsageError(
-            "Unknown MCP command. Use /mcp list|status|reload or /mcp enable|disable|get|tools|login|logout|reconnect|refresh <server>.",
+            "Unknown MCP command. Use /mcp list|status|reload or /mcp enable|disable|get|tools|login|logout|reconnect|refresh <server>, or /mcp add|remove --scope global|project ... .",
           );
         if (ctx.hasUI)
           ctx.ui.notify(
@@ -588,13 +619,13 @@ export default function mcpClient(
           );
       } catch (error) {
         const message =
-          error instanceof CommandUsageError
+          error instanceof CommandUsageError || error instanceof ConfigMutationError
             ? error.message
             : formatDiagnostic(
                 diagnose(error, {
                   server,
                   operation:
-                    ["reload", "get", "enable", "disable"].includes(action)
+                    ["reload", "get", "enable", "disable", "add", "remove"].includes(action)
                       ? "configuration"
                       : action === "tools"
                         ? "search"

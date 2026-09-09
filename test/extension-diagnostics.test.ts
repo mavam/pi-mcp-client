@@ -71,6 +71,117 @@ async function host(configuration: string, excluded: string[] = [], credentialSt
   };
 }
 
+test("add is lazy and remove deactivates affected tools without touching credentials", async () => {
+  let credentialAccesses = 0;
+  const h = await host(JSON.stringify({ mcpServers: { other: fixtureServer } }), [], async () => {
+    credentialAccesses++;
+    throw new Error("must not access credentials");
+  });
+  h.setActiveTools(["mcp_tools", "unrelated"]);
+  await h.execute("mcp_tools", { activate: ["other.echo"] });
+  await h.command(`add --scope global example -- ${JSON.stringify(fixtureServer.command)} ${JSON.stringify(fixtureServer.args[0])}`);
+  expect(h.notifications.at(-1)).toContain("saved in global configuration");
+  expect(h.activeTools()).toEqual(["mcp_tools", "unrelated", "mcp__other__echo"]);
+  await h.command("get example");
+  expect(h.notifications.at(-1)).toContain("disconnected");
+  await h.execute("mcp_tools", { activate: ["example.echo"] });
+  const old = h.tools.get("mcp__example__echo");
+  await h.command("remove --scope global example");
+  expect(h.notifications.at(-1)).toContain("Credentials were retained");
+  expect(h.activeTools()).toEqual(["mcp_tools", "unrelated", "mcp__other__echo"]);
+  const result = await old.execute("old", { message: "blocked" }, h.ctx.signal, undefined, h.ctx);
+  expect(result.details.failed).toBe(true);
+  expect(h.commands.get("mcp").getArgumentCompletions("remove --scope global "))
+    .toEqual([{ value: "remove --scope global other", label: "other" }]);
+  expect(credentialAccesses).toBe(0);
+});
+
+test("scoped commands reconcile override replacement and global fallback without activation", async () => {
+  const h = await host(JSON.stringify({ mcpServers: { docs: fixtureServer } }));
+  h.ctx.isProjectTrusted = () => true;
+  await h.execute("mcp_tools", { activate: ["docs.echo"] });
+  await h.command("add --scope project --replace docs https://project.example/mcp");
+  expect(h.notifications.at(-1)).toContain("saved in project configuration");
+  expect(h.activeTools()).toEqual(["mcp_tools"]);
+  await h.command("get docs");
+  expect(h.notifications.at(-1)).toContain("Transport: HTTP");
+  await h.command("remove --scope project docs");
+  expect(h.notifications.at(-1)).toContain("other scope remains effective");
+  expect(h.activeTools()).toEqual(["mcp_tools"]);
+  await h.command("get docs");
+  expect(h.notifications.at(-1)).toContain("Transport: stdio");
+  expect(h.notifications.at(-1)).toContain("disconnected");
+});
+
+test("configuration commands wait for idle, serialize updates, and reject unsafe edits without writes", async () => {
+  const h = await host(JSON.stringify({ mcpServers: {} }));
+  const path = join(h.directory, "mcp.json");
+  const before = await readFile(path, "utf8");
+  let finish!: () => void;
+  h.ctx.waitForIdle = () => new Promise<void>((resolve) => { finish = resolve; });
+  const pending = h.command("add --scope global first https://first.example");
+  await Promise.resolve();
+  expect(await readFile(path, "utf8")).toBe(before);
+  finish();
+  await pending;
+  h.ctx.waitForIdle = async () => {};
+  await Promise.all([
+    h.command("add --scope global second https://second.example"),
+    h.command("add --scope global third https://third.example"),
+  ]);
+  expect(h.commands.get("mcp").getArgumentCompletions("get ")).toHaveLength(3);
+  const saved = await readFile(path, "utf8");
+  for (const command of [
+    "add --scope project local https://project.example", "add --scope global first https://duplicate.example",
+    "add --scope global bad ftp://private-secret", "remove --scope global missing",
+    "add --scope global --header private-secret bad https://example.com",
+  ]) {
+    await h.command(command);
+    expect(h.notifications.at(-1)).not.toContain("private-secret");
+    expect(await readFile(path, "utf8")).toBe(saved);
+  }
+  h.ctx.signal = AbortSignal.abort();
+  await h.command("remove --scope global first");
+  expect(h.notifications.at(-1)).toContain("cancelled");
+  expect(await readFile(path, "utf8")).toBe(saved);
+});
+
+test("a session switch while add waits for idle prevents mutation", async () => {
+  const h = await host(JSON.stringify({ mcpServers: {} }));
+  let finish!: () => void;
+  h.ctx.waitForIdle = () => new Promise<void>((resolve) => { finish = resolve; });
+  const pending = h.command("add --scope global docs https://example.com");
+  await Promise.resolve();
+  await h.hooks.get("session_start")({}, h.ctx);
+  finish();
+  await pending;
+  expect(h.notifications.at(-1)).toContain("session changed");
+  expect(JSON.parse(await readFile(join(h.directory, "mcp.json"), "utf8"))).toEqual({ mcpServers: {} });
+});
+
+test("removing a disabled OAuth server never accesses its credentials", async () => {
+  let credentials = 0;
+  const h = await host(JSON.stringify({ mcpServers: {
+    private: { url: "https://example.com/mcp", oauth: true, disabled: true },
+  } }), [], async () => { credentials++; throw new Error("must not access credentials"); });
+  await h.command("remove --scope global private");
+  expect(h.notifications.at(-1)).toContain("Credentials were retained");
+  expect(credentials).toBe(0);
+  expect(JSON.parse(await readFile(join(h.directory, "mcp.json"), "utf8"))).toEqual({ mcpServers: {} });
+});
+
+test("headless add and remove do not require UI or execute secret commands", async () => {
+  const h = await host(JSON.stringify({ mcpServers: {} }));
+  h.ctx.hasUI = false;
+  const marker = join(h.directory, "must-not-exist");
+  await h.command(`add --scope global --header 'X-Key: !touch ${marker}' docs https://example.com`);
+  expect(h.activeTools()).toEqual(["mcp_tools"]);
+  await expect(readFile(marker)).rejects.toThrow();
+  await h.command("remove --scope global docs");
+  expect(JSON.parse(await readFile(join(h.directory, "mcp.json"), "utf8"))).toEqual({ mcpServers: {} });
+  await expect(h.command("remove --scope global missing")).rejects.toThrow("selected scope");
+});
+
 test("logout accepts disabled servers, preserves configuration, and explains external credentials", async () => {
   let record: string | null = null;
   const store = { read: () => record, write: (value: string) => { record = value; }, remove: () => { record = null; } };
@@ -357,7 +468,7 @@ test("command completion suggests actions first and servers only after an action
   } }));
   const complete = h.commands.get("mcp").getArgumentCompletions;
   expect(complete("")).toEqual(
-    ["list", "status", "reload", "enable", "disable", "get", "tools", "login", "logout", "reconnect", "refresh"]
+    ["list", "status", "reload", "add", "remove", "enable", "disable", "get", "tools", "login", "logout", "reconnect", "refresh"]
       .map((value) => ({ value, label: value })),
   );
   expect(complete("to")).toEqual([{ value: "tools", label: "tools" }]);

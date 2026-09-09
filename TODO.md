@@ -19,9 +19,9 @@ stays redacted, discovery never activates tools, and authentication stays explic
 - [x] **Pre-registered OAuth clients:** `oauthClientId` supports public clients on
   servers without dynamic registration, with issuer binding and separate OS-backed
   credentials per configured client ID.
-- [ ] **Configuration commands:** Add explicit `/mcp add` and `/mcp remove`
-  operations with scope selection and validation. Adding must not execute a server;
-  removing configuration must be distinct from logout and disabling.
+- [x] **Configuration commands:** `/mcp add` and `/mcp remove` require explicit
+  scope selection and validate before saving. Adding never executes a server;
+  removing configuration retains credentials and is distinct from disabling.
 - [ ] **OAuth options:** Evaluate requested scopes, configurable callback ports,
   and browser-free callback handoff. Keep non-interactive refusal explicit.
 
