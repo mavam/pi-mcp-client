@@ -683,21 +683,6 @@ images pass through within an 8 MiB base64 budget; other binary content is kept 
 the full result file. Temporary result files are not automatically deleted and
 may contain sensitive data.
 
-### v0.1 scope
-
-The first release focused on tools; resource discovery and on-demand reading are
-now supported too. Legacy SSE transport, MCP Apps, resource subscriptions,
-template argument completions, prompt commands, roots, sampling, and elicitation
-aren't supported.
-See the [post-v0.1 backlog](https://github.com/mavam/pi-mcp-client/blob/main/TODO.md)
-for follow-up work; it is not a release commitment.
-
-## 🧹 Uninstall
-
-```sh
-pi remove npm:pi-mcp-client
-```
-
 ## 📄 License
 
 [MIT](LICENSE)
