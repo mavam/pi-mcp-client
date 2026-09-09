@@ -64,21 +64,21 @@ function validateOptions(
       fail(key);
   }
   if (entry.oauthClientId !== undefined &&
-      (entry.oauth !== true || typeof entry.oauthClientId !== "string" ||
+      (entry.oauth === false || typeof entry.oauthClientId !== "string" ||
         !entry.oauthClientId.trim() || entry.oauthClientId.length > 4096 ||
         /[\u0000-\u001f\u007f]/u.test(entry.oauthClientId)))
-    fail("oauthClientId (requires oauth: true and a nonempty client ID)");
+    fail("oauthClientId (requires OAuth and a nonempty client ID)");
   if (entry.oauthScopes !== undefined &&
-      (entry.oauth !== true || !Array.isArray(entry.oauthScopes) ||
+      (entry.oauth === false || !Array.isArray(entry.oauthScopes) ||
         entry.oauthScopes.length === 0 || entry.oauthScopes.length > 100 ||
         !entry.oauthScopes.every((scope: unknown) => typeof scope === "string" &&
           scope.length <= 256 && /^[\x21\x23-\x5b\x5d-\x7e]+$/u.test(scope)) ||
         new Set(entry.oauthScopes).size !== entry.oauthScopes.length))
-    fail("oauthScopes (requires oauth: true and 1–100 unique OAuth scope tokens)");
+    fail("oauthScopes (requires OAuth and 1–100 unique OAuth scope tokens)");
   if (entry.oauthCallbackPort !== undefined &&
-      (entry.oauth !== true || !Number.isInteger(entry.oauthCallbackPort) ||
+      (entry.oauth === false || !Number.isInteger(entry.oauthCallbackPort) ||
         Number(entry.oauthCallbackPort) < 1 || Number(entry.oauthCallbackPort) > 65535))
-    fail("oauthCallbackPort (requires oauth: true and a port from 1–65535)");
+    fail("oauthCallbackPort (requires OAuth and a port from 1–65535)");
   for (const key of ["oauth", "disabled"]) {
     if (entry[key] !== undefined && typeof entry[key] !== "boolean") fail(key);
   }
@@ -152,7 +152,7 @@ function parseConnections(value: unknown, source: string): Config {
       (entry.type === "http" && !entry.url)
     )
       fail("type (must match command or url)");
-    if (entry.command && (entry.oauth || entry.headers))
+    if (entry.command && (entry.oauth || entry.headers || entry.oauthClientId !== undefined || entry.oauthScopes !== undefined || entry.oauthCallbackPort !== undefined))
       fail("HTTP options on stdio transport");
     if (entry.url && (entry.args || entry.cwd || entry.env))
       fail("stdio options on HTTP transport");
@@ -197,7 +197,6 @@ export async function loadConfig(
 export type ConfigScope = "global" | "project";
 export type ConfigMutation =
   | { action: "toggle"; server: string; disabled: boolean }
-  | { action: "oauth"; server: string; expected: ServerConfig }
   | { action: "add"; server: string; scope: ConfigScope; definition: ServerConfig; replace: boolean }
   | { action: "remove"; server: string; scope: ConfigScope };
 
@@ -259,16 +258,6 @@ export async function updateServerConfig(
       if (!Object.hasOwn(document.mcpServers, server))
         throw new ConfigMutationError("Server is not defined in the selected scope. No configuration was changed.");
       delete document.mcpServers[server];
-    } else if (mutation.action === "oauth") {
-      const definition = document.mcpServers[server];
-      if (JSON.stringify(parsed[source][server]) !== JSON.stringify(mutation.expected))
-        throw new ConfigMutationError("Server configuration changed. Run /mcp reload and retry login.");
-      if (!definition.url || definition.disabled)
-        throw new ConfigMutationError("OAuth login requires an enabled HTTP server.");
-      if (Object.keys(definition.headers ?? {}).some((name) => name.toLowerCase() === "authorization"))
-        throw new ConfigMutationError("This server uses an Authorization header. Remove it from the server definition before using /mcp login, or keep using header authentication.");
-      changed = definition.oauth !== true;
-      if (changed) definition.oauth = true;
     } else {
       changed = Boolean(document.mcpServers[server].disabled) !== mutation.disabled;
       if (changed) document.mcpServers[server].disabled = mutation.disabled;
@@ -361,13 +350,19 @@ export function resolveServer(config: ServerConfig, cwd: string): ServerConfig {
     result.url = url.href;
   }
   if (
-    result.oauth &&
+    (result.oauth || result.oauthClientId !== undefined || result.oauthScopes !== undefined || result.oauthCallbackPort !== undefined) &&
     Object.keys(result.headers ?? {}).some(
       (key) => key.toLowerCase() === "authorization",
     )
   )
     throw new Error("Use OAuth or an Authorization header, not both.");
   return result;
+}
+
+/** Authorization headers take precedence over automatic OAuth; false opts out. */
+export function usesOAuth(config: ServerConfig): boolean {
+  return Boolean(config.url) && config.oauth !== false &&
+    !Object.keys(config.headers ?? {}).some((name) => name.toLowerCase() === "authorization");
 }
 
 export function fingerprint(value: unknown): string {

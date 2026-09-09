@@ -10,7 +10,7 @@ import {
   type StoredOAuthClientInformation,
   type StoredOAuthTokens,
 } from "@modelcontextprotocol/client";
-import { fingerprint, object, type ClientOptions } from "./config.js";
+import { fingerprint, object, usesOAuth, type ServerConfig, type ClientOptions } from "./config.js";
 import { oauthCallbackHtml } from "./oauth-page.js";
 import { diagnose, DiagnosticError, failure } from "./diagnostics.js";
 
@@ -79,6 +79,18 @@ export async function credentialStore(url: string, clientId?: string): Promise<S
   }
 }
 
+function clientMetadata(options: OAuthOptions): OAuthClientMetadata {
+  return {
+    client_name: "Pi MCP Client",
+    redirect_uris: [callbackUrl(options)],
+    grant_types: ["authorization_code", "refresh_token"],
+    response_types: ["code"],
+    token_endpoint_auth_method: "none",
+    application_type: "native",
+    ...(options.oauthScopes ? { scope: options.oauthScopes.join(" ") } : {}),
+  };
+}
+
 export class OAuthProvider implements OAuthClientProvider {
   readonly redirectUrl: string;
   readonly clientMetadata: OAuthClientMetadata;
@@ -97,15 +109,7 @@ export class OAuthProvider implements OAuthClientProvider {
     options: OAuthOptions = {},
   ) {
     this.redirectUrl = callbackUrl(options);
-    this.clientMetadata = {
-      client_name: "Pi MCP Client",
-      redirect_uris: [this.redirectUrl],
-      grant_types: ["authorization_code", "refresh_token"],
-      response_types: ["code"],
-      token_endpoint_auth_method: "none",
-      application_type: "native",
-      ...(options.oauthScopes ? { scope: options.oauthScopes.join(" ") } : {}),
-    };
+    this.clientMetadata = clientMetadata(options);
     this.key = credentialKey(url, clientId);
     this.epoch = credentialEpochs.get(this.key) ?? 0;
     const raw = store.read();
@@ -227,6 +231,57 @@ export class OAuthProvider implements OAuthClientProvider {
     if (scope === "all" || scope === "discovery") this.discovery = undefined;
     this.save();
   }
+}
+
+/** Reuse stored tokens without requiring a working keyring for public servers.
+ * Only explicit login may register a client or open a browser; background
+ * authentication may reuse or refresh existing grants through the SDK.
+ */
+export async function connectionAuthProvider(
+  config: ServerConfig,
+  storeFactory: CredentialStoreFactory = credentialStore,
+): Promise<OAuthClientProvider | undefined> {
+  if (!usesOAuth(config)) return undefined;
+  let initialized = false;
+  const create = async () => {
+    const provider = new OAuthProvider(
+      config.url!, await storeFactory(config.url!, config.oauthClientId), undefined, config.oauthClientId, config,
+    );
+    initialized = true;
+    return provider;
+  };
+  let pending: Promise<OAuthProvider> | undefined;
+  // Preserve up-front credential-store validation for explicit OAuth configurations.
+  if (config.oauth === true) pending = Promise.resolve(await create());
+  const get = () => pending ??= create();
+  return {
+    redirectUrl: callbackUrl(config),
+    clientMetadata: clientMetadata(config),
+    state: async () => (await get()).state(),
+    clientInformation: async (ctx) => {
+      const info = (await get()).clientInformation(ctx);
+      if (!info) throw failure("authentication_required", { operation: "connect", oauth: true });
+      return info;
+    },
+    saveClientInformation: async (info, ctx) => (await get()).saveClientInformation(info, ctx),
+    tokens: async (ctx) => {
+      try { return (await get()).tokens(ctx); }
+      catch (error) {
+        // An unavailable store must not block an anonymous/public connection.
+        // Keep the rejected promise: a later OAuth challenge fails closed in get().
+        if (!initialized && config.oauth !== true && !ctx && error instanceof DiagnosticError &&
+            error.diagnostic.code === "credential_store_unavailable") return undefined;
+        throw error;
+      }
+    },
+    saveTokens: async (tokens) => (await get()).saveTokens(tokens),
+    saveCodeVerifier: async (value) => (await get()).saveCodeVerifier(value),
+    codeVerifier: async () => (await get()).codeVerifier(),
+    redirectToAuthorization: async (url) => (await get()).redirectToAuthorization(url),
+    saveDiscoveryState: async (value) => (await get()).saveDiscoveryState(value),
+    discoveryState: async () => pending ? (await pending).discoveryState() : undefined,
+    invalidateCredentials: async (scope) => (await get()).invalidateCredentials(scope),
+  };
 }
 
 export type Revocation = "confirmed" | "unsupported" | "unconfirmed" | "not-needed";

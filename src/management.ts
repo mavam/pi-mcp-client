@@ -1,5 +1,5 @@
 import { line, plain, type CatalogTool } from "./catalog.js";
-import { object, resolveServer, type ServerConfig } from "./config.js";
+import { object, resolveServer, usesOAuth, type ServerConfig } from "./config.js";
 import { credentialStore, OAuthProvider, type CredentialStoreFactory } from "./auth.js";
 import type { ServerStatus } from "./runtime.js";
 import { truncateToWidth } from "@earendil-works/pi-tui";
@@ -112,11 +112,11 @@ export async function authenticationSummary(
   cwd: string,
   storeFactory: CredentialStoreFactory = credentialStore,
 ): Promise<string> {
-  if (!config.oauth) return config.command
+  if (!usesOAuth(config)) return config.command
     ? "Server-managed (stdio)"
     : Object.keys(config.headers ?? {}).length
       ? "Headers (externally managed)"
-      : "None configured";
+      : "OAuth disabled";
   const method = config.oauthClientId === undefined ? "OAuth" : "OAuth (pre-registered public client)";
   try {
     const { url, clientId } = oauthSettings(config, cwd);
@@ -141,8 +141,8 @@ export function inspectServer(
     `Server: ${name}`,
     `Transport: ${config.command ? "stdio" : "HTTP"}`,
     `Protocol: ${config.protocol ?? "auto"}`,
-    `OAuth: ${config.oauth ? "enabled" : "disabled"}`,
-    ...(config.oauth ? [
+    `OAuth: ${usesOAuth(config) ? config.oauth === true ? "enabled" : "automatic" : "disabled"}`,
+    ...(usesOAuth(config) ? [
       `Requested scopes: ${config.oauthScopes?.map(line).join(", ") ?? "SDK/server defaults"}`,
       `OAuth callback: http://127.0.0.1:${config.oauthCallbackPort ?? 19847}/callback`,
     ] : []),

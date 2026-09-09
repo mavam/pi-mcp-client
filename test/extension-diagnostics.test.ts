@@ -187,7 +187,7 @@ test("logout accepts disabled servers, preserves configuration, and explains ext
   const store = { read: () => record, write: (value: string) => { record = value; }, remove: () => { record = null; } };
   const configuration = JSON.stringify({ mcpServers: {
     example: { url: "https://oauth.example/mcp", oauth: true },
-    alias: { url: "https://oauth.example/mcp", oauth: true, disabled: true },
+    alias: { url: "https://oauth.example/mcp", disabled: true },
     external: { url: "https://external.example/mcp", headers: { Authorization: "!never-execute" } },
   } });
   const h = await host(configuration, [], async () => store);
@@ -268,20 +268,40 @@ test("login refuses header authentication, disabled servers, and headless use wi
   for (const definition of [
     { url: "https://example.com/mcp", headers: { aUtHoRiZaTiOn: "!never-execute" } },
     { url: "https://example.com/mcp", disabled: true },
+    { url: "https://example.com/mcp", oauth: false },
     { url: "https://example.com/mcp" },
   ]) {
     let accesses = 0;
     const configuration = JSON.stringify({ mcpServers: { example: definition } });
     const h = await host(configuration, [], async () => { accesses++; throw new Error("unexpected access"); });
-    if (!definition.headers && !definition.disabled) {
+    if (!definition.headers && !definition.disabled && definition.oauth !== false) {
       h.ctx.hasUI = false;
       await expect(h.command("login example")).rejects.toThrow("interactive session");
     } else {
       await h.command("login example");
-      expect(h.notifications.at(-1)).toContain(definition.headers ? "Authorization header" : "Disabled servers");
+      expect(h.notifications.at(-1)).toContain(definition.headers ? "Authorization header" : definition.disabled ? "Disabled servers" : "explicitly disabled");
     }
     expect(accesses).toBe(0);
     expect(await readFile(join(h.directory, "mcp.json"), "utf8")).toBe(configuration);
+  }
+});
+
+test("login uses the effective definition without writing global or project files", async () => {
+  for (const trusted of [true, false]) {
+    const global = JSON.stringify({ mcpServers: { example: { url: "https://global.example/mcp" } } });
+    const project = trusted ? JSON.stringify({ mcpServers: { example: { url: "https://project.example/mcp" } } }) : "untrusted invalid JSON";
+    const accessed: string[] = [];
+    const h = await host(global, [], async (url) => {
+      accessed.push(url);
+      throw new Error("fixture: stop before network access");
+    });
+    await writeFile(join(h.directory, ".mcp.json"), project);
+    h.ctx.isProjectTrusted = () => trusted;
+    await h.command("reload");
+    await h.command("login example");
+    expect(accessed).toEqual([trusted ? "https://project.example/mcp" : "https://global.example/mcp"]);
+    expect(await readFile(join(h.directory, "mcp.json"), "utf8")).toBe(global);
+    expect(await readFile(join(h.directory, ".mcp.json"), "utf8")).toBe(project);
   }
 });
 
@@ -345,8 +365,9 @@ for (const configured of [true, false]) for (const outcome of ["success", "cance
       callback.searchParams.set("state", authorization.searchParams.get("state")!);
       return callback.href;
     } });
+    const before = await readFile(join(h.directory, "mcp.json"), "utf8");
     await h.command("login example --no-browser");
-    expect(JSON.parse(await readFile(join(h.directory, "mcp.json"), "utf8")).mcpServers.example.oauth).toBe(true);
+    expect(await readFile(join(h.directory, "mcp.json"), "utf8")).toBe(before);
     expect(prompts).toBe(1);
     expect(tokenRequests).toBe(outcome === "success" ? 1 : 0);
     expect(reconnect).toHaveBeenCalledTimes(outcome === "success" ? 1 : 0);

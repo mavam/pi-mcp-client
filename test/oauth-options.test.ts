@@ -17,7 +17,8 @@ test("OAuth scopes and callback ports validate strictly and require HTTP OAuth",
   for (const oauthCallbackPort of [0, -1, 65536, 1.5, "19847", null])
     expect(() => parseConfig({ mcpServers: { test: { ...definition, oauthCallbackPort } } })).toThrow();
   for (const option of [{ oauthScopes: ["read"] }, { oauthCallbackPort: 19848 }]) {
-    for (const transport of [{ url: definition.url }, { url: definition.url, oauth: false }, { command: "server", oauth: true }])
+    expect(parseConfig({ mcpServers: { test: { url: definition.url, ...option } } }).test).toEqual({ url: definition.url, ...option });
+    for (const transport of [{ url: definition.url, oauth: false }, { command: "server" }, { command: "server", oauth: true }])
       expect(() => parseConfig({ mcpServers: { test: { ...transport, ...option } } })).toThrow();
   }
   const config = parseConfig({ mcpServers: { test: { ...definition, oauthScopes: ["read", "api:write"], oauthCallbackPort: 19848 } } }).test;

@@ -105,6 +105,7 @@ test("authentication inspection is local, redacted, and distinguishes unavailabl
     .toBe("OAuth · credential status unavailable");
   expect(await authenticationSummary({ url, headers: { Authorization: "!never-execute" } }, "/", factory)).toContain("externally managed");
   expect(await authenticationSummary({ command: "never-execute" }, "/", factory)).toContain("Server-managed");
-  expect(await authenticationSummary({ url }, "/", factory)).toBe("None configured");
-  expect(reads).toBe(3);
+  expect(await authenticationSummary({ url }, "/", factory)).toBe("OAuth · credential status unavailable");
+  expect(await authenticationSummary({ url, oauth: false }, "/", factory)).toBe("OAuth disabled");
+  expect(reads).toBe(4);
 });
