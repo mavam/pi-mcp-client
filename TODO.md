@@ -30,17 +30,22 @@ and [Claude Code MCP](https://code.claude.com/docs/en/mcp).
 
 ## High priority: broader server compatibility
 
-- [ ] **Resources:** List, search, and read resources; expand resource templates;
-  attach selected content to a conversation without loading it all into context.
-  Existing handling of resource content returned by tools is not resource browsing.
+- [x] **Resources:** Discover tool and resource metadata together, then read selected
+  resources as bounded conversation context. Exact tool-returned resource links
+  can be read without prior discovery. No manual resource browser is required.
+- [ ] **Resource templates and subscriptions:** Discover and expand resource
+  templates; evaluate explicit subscriptions without silently replacing attached
+  content snapshots.
 - [ ] **Prompts:** Discover and run server-provided prompts with argument entry and
   explicit user selection. Treat prompt content as untrusted server data.
 - [ ] **Roots:** Advertise explicitly authorized workspace roots and notify servers
   when they change. Roots are scope hints, not a filesystem sandbox.
 - [x] **Tool catalog notifications:** Handle `tools/list_changed` and invalidate
   stale catalogs without silently replacing an active tool contract.
-- [ ] **Resource and prompt catalog notifications:** Extend notification handling
-  when those capabilities are implemented.
+- [x] **Resource catalog notifications:** Invalidate resource metadata without
+  fetching content or changing active tools.
+- [ ] **Prompt catalog notifications:** Extend notification handling when prompts
+  are implemented.
 - [ ] **Additional OAuth interoperability:** Support confidential pre-registered
   clients and client ID metadata documents where supported by the SDK and server.
   Public pre-registered clients are implemented. Preserve issuer binding and

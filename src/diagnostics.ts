@@ -2,6 +2,8 @@ import {
   OAuthClientFlowError,
   OAuthError,
   ProtocolError,
+  ProtocolErrorCode,
+  ResourceNotFoundError,
   SdkError,
   SdkHttpError,
   UnauthorizedError,
@@ -21,6 +23,10 @@ const messages = {
   server_disabled: "The MCP server is disabled.",
   tool_changed: "The tool is unavailable or its configuration or schema changed.",
   tool_error: "The tool reported an error.",
+  resource_invalid: "The resource URI is invalid.",
+  resource_not_found: "The resource is no longer available or was not found.",
+  resources_unsupported: "The server does not advertise resource access.",
+  catalog_changed: "The catalog kept changing during discovery.",
   oauth_failed: "OAuth authentication did not complete.",
   oauth_issuer_changed: "The OAuth authorization server changed.",
   callback_unavailable: "The local OAuth callback port is unavailable.",
@@ -33,6 +39,7 @@ export type Operation =
   | "connect"
   | "search"
   | "call"
+  | "read"
   | "auth"
   | "reconnect"
   | "refresh";
@@ -86,6 +93,10 @@ export function diagnostic(
       "Check server filters and use mcp_tools with activate and the exact identifier to activate the current tool definition. Reload Pi if the connection configuration changed.",
     tool_error:
       "Review the server's tool result and inputs. Verify the outcome before retrying.",
+    resource_invalid: "Use an exact absolute resource URI from discovery or a tool-returned resource link.",
+    resource_not_found: `Refresh with /mcp refresh ${target}, or obtain a new resource link.`,
+    resources_unsupported: "Use this server's tools instead, or select a server with resource support.",
+    catalog_changed: "Retry discovery once the server catalog has settled.",
     oauth_failed: `Check OAuth support, the configured public client ID, and callback access. Retry /mcp login ${target}, or use /mcp login ${target} --no-browser for manual callback handoff.`,
     oauth_issuer_changed: `Verify the server configuration before running /mcp logout ${target} and /mcp login ${target} to trust the new authorization server.`,
     callback_unavailable: `Free the configured callback port, change oauthCallbackPort, or run /mcp login ${target} --no-browser.`,
@@ -163,7 +174,9 @@ export function diagnose(error: unknown, context: DiagnosticContext): Diagnostic
     }
     if (current instanceof OAuthClientFlowError || current instanceof OAuthError)
       return diagnostic("oauth_failed", context);
-    if (current instanceof ProtocolError) return diagnostic("protocol_error", context);
+    if (current instanceof ProtocolError) return diagnostic(
+      context.operation === "read" && (current instanceof ResourceNotFoundError || current.code === ProtocolErrorCode.ResourceNotFound) ? "resource_not_found" : "protocol_error", context,
+    );
     if (current.name === "TimeoutError") return diagnostic("timeout", context);
     if (current.name === "AbortError") return diagnostic("cancelled", context);
     const code = (current as NodeJS.ErrnoException).code;

@@ -1,7 +1,8 @@
 # 🔌 Pi MCP Client
 
-MCP tools for Pi, discovered on demand and called natively through the official
-TypeScript SDK. No bridge process and no invocation proxy.
+MCP tools and resources for Pi, discovered on demand through the official
+TypeScript SDK. Read resources as context and call tools natively. No bridge
+process and no invocation proxy.
 
 ## 🚀 Installation
 
@@ -29,23 +30,36 @@ Start a new Pi session and ask it to search Cloudflare's documentation. Use `/mc
 to inspect the connection. For authenticated services, see [OAuth](#oauth) or
 [secret commands](#secret-commands).
 
-Pi discovers candidates, explicitly activates the tools it needs, then calls
-those tools natively. One `mcp_tools` tool supports both steps:
+Pi discovers tool and resource metadata, reads selected resources as context,
+and explicitly activates tools before calling them natively. One `mcp_tools`
+tool supports all three operations:
 
 ```js
-// Discover candidates. Never activates, even for an exact-name query.
-mcp_tools({ query: "list teams", server: "linear", limit: 5 })
+// Discover tool and resource metadata. Never reads content or activates tools.
+mcp_tools({ query: "database schema", server: "warehouse", limit: 5 })
+
+// Read one resource into the conversation as a tool result.
+mcp_tools({ read: { server: "warehouse", uri: "schema://analytics" } })
+
+// Restrict discovery to tools when no resource context is needed.
+mcp_tools({ query: "list teams", server: "linear", kind: "tools" })
 
 // Activate exact identifiers. Never invokes.
 mcp_tools({ activate: ["linear.list_teams", "linear.get_team"] })
 ```
 
-Pass exactly one of `query` or `activate`. The optional `server` and `limit`
-fields are valid only with `query`. Discovery returns up to five candidates by
-default, or up to 50 with `limit`. Each candidate shows its exact activation
-identifier, a short description, required parameter names only, and `[loaded]`
-if already active. Results use local BM25-based ranking, with tool names weighted
-more strongly than descriptions and support for prefix matching.
+Pass exactly one of `query`, `activate`, or `read`. The optional `kind`, `server`,
+and `limit` fields are query-only; reads carry their server inside `read`.
+`kind` defaults to `all`, or accepts `tools` and `resources`. Discovery returns up
+to five candidates by default, or up to 50 with `limit`, across both kinds.
+
+Tool candidates show an exact activation identifier, a short description,
+required parameter names only, and `[loaded]` if already active. Resource
+candidates show the owning server, title or name, exact URI, description, and
+content type when supplied. Each candidate includes exact next-call arguments.
+Search uses local BM25-based ranking of metadata, with names and resource titles
+weighted more strongly than descriptions, and support for prefix matching.
+Resource content isn't fetched or searched during discovery.
 
 Activation accepts 1–50 exact `server.tool` or `mcp__server__tool` identifiers,
 ignores duplicates, and works without a prior search. Typos never activate fuzzy
@@ -59,8 +73,48 @@ can never become an active tool. Previously loaded tools remain available.
 
 `mcp_tools` replaces `mcp_search` without backward compatibility. Update explicit
 Pi tool allowlists to use `mcp_tools` and activate the tools you need again in
-existing sessions. The UI labels discovery calls **mcp discover** and activation
-calls **mcp activate**.
+existing sessions. The UI labels discovery calls **mcp discover**, activation
+calls **mcp activate**, and resource reads **mcp read**.
+
+### Read resources as context
+
+Ask Pi to use relevant context, such as a database schema or API guide. It can
+discover the resource and read it without a browser, picker, or attachment dialog:
+
+```js
+mcp_tools({ query: "authentication guide", kind: "resources" })
+mcp_tools({ read: { server: "docs", uri: "docs://authentication" } })
+```
+
+A read fetches one exact resource URI through its configured server's MCP
+`resources/read` operation. It doesn't open a local file or make a generic HTTP
+request, even for `file:` or `https:` URIs. There is no fallback when the server
+can't read the URI. The server still controls which data it returns.
+
+Tool-returned resource links include an exact `mcp_tools({read: ...})` call. Such
+links can be read directly, without prior discovery or activation; linked
+resources don't have to appear in the catalog. Resource templates aren't listed
+or expanded yet, but a concrete URI produced from a template can be read.
+
+Reading attaches content as the tool result itself, not as a second message. The
+result identifies the source server and URIs and labels the content as untrusted
+data. JSON and supported images use the existing result display. Large text is
+truncated at 2,000 lines or 50 KiB; oversized results and unsupported binary
+content are retained in a private temporary file. A resource read fetches the
+server's full response before applying output limits; it isn't a streaming or
+partial-content reader.
+
+Reads never activate tools, start OAuth login, follow links in resource bodies,
+or subscribe to live updates. Repeated reads fetch fresh content; earlier results
+stay as snapshots. Resuming a session or navigating its branches doesn't re-read
+resources. Resource content and selected metadata, including URIs, become session
+data and may be sensitive. Private spill files can also contain sensitive data.
+
+`includeTools` and `excludeTools` apply only to tools, not resources. Keeping
+`mcp_tools` available permits resource reads from enabled servers, subject to the
+server's authorization. `kind: "tools"` filters one search; it isn't an access
+restriction. Disable a server to prevent all access, or exclude `mcp_tools` through
+Pi's tool restrictions. Per-resource permission policies aren't implemented.
 
 ### Result display
 
@@ -105,7 +159,7 @@ not the displayed link label.
 | `/mcp login <server> [--no-browser]` | Authenticate an OAuth-enabled HTTP server; optionally paste the callback URL in an interactive dialog. |
 | `/mcp logout <server>` | Remove local OAuth credentials and attempt remote revocation, including for disabled servers. |
 | `/mcp reconnect <server>` | Replace a connection and refresh its catalog. |
-| `/mcp refresh <server>` | Refresh a server's catalog without loading additional tools. |
+| `/mcp refresh <server>` | Refresh tool and resource metadata without reading resources or loading additional tools. |
 
 The status matrix uses glyphs to distinguish idle (`○`), connected (`●`),
 connecting (`▶︎`), disabled (`○`), and failed (`✘︎`) servers. Idle is normal:
@@ -360,16 +414,25 @@ than deleted.
 ### Discovery and caching
 
 Connections start on demand, never while the extension factory loads. A search
-without a cached catalog contacts configured servers, with at most four discoveries
-in flight. A server-scoped search only contacts that server. Activation discovers
+without the requested cached metadata contacts configured servers, with at most
+four server discoveries in flight. A server-scoped search only contacts that server. Activation discovers
 only the servers named by its identifiers, with the same concurrency bound.
 Failed servers are reported as unavailable, not mistaken for an empty catalog.
 
-Catalogs are cached privately under `~/.pi/agent/cache/pi-mcp-client/`, keyed by
+Tool catalogs are cached privately under `~/.pi/agent/cache/pi-mcp-client/`, keyed by
 server configuration and working directory. Disk caches expire after 24 hours.
-They contain tool metadata, not configured credentials. Cached discovery and
-activation need no connection; invocation refreshes the live catalog before
+They contain tool metadata, not configured credentials. Cached tool-only discovery
+and activation need no connection; invocation refreshes the live catalog before
 calling the tool.
+
+Resource metadata is held only in memory for up to five minutes, not written to
+the tool catalog cache. Mixed discovery therefore may connect even when tools
+are cached on disk. Resource-list notifications, disconnection, and explicit
+refresh invalidate resource metadata without reading content. Tool and resource
+catalog failures are reported independently; healthy candidates remain available.
+The SDK handles pagination. Resource catalogs are limited to 10,000 entries and
+4 MiB of descriptor data; oversized catalogs fail rather than silently returning
+a partial list. Reads bypass the SDK content cache.
 Connections remain open until shutdown or explicit reconnection.
 
 When a connected server reports a tool-list change, the extension invalidates its
@@ -557,6 +620,10 @@ unavailable server is not an empty catalog.
 | `protocol_error` | Server compatibility and the `protocol` setting. |
 | `tool_changed` | Server filters and the current tool schema; activate the exact identifier again. Reload Pi if connection configuration changed. |
 | `tool_error` | The server's tool result and inputs; verify the outcome before retrying. |
+| `resource_invalid` | Use an exact absolute resource URI from discovery or a tool-returned link. |
+| `resource_not_found` | Refresh resource metadata or obtain a new link. |
+| `resources_unsupported` | Use the server's tools instead, or choose a resource-capable server. |
+| `catalog_changed` | Retry discovery after the server catalog settles. |
 | `oauth_failed` | Browser access to the callback and support for public clients, using dynamic registration or the configured client ID. |
 | `oauth_issuer_changed` | Verify the authorization-server change before logging out and logging in again. |
 | `callback_unavailable` | Another process using the configured loopback port (default 19847). Change `oauthCallbackPort` or use `/mcp login <server> --no-browser`. |
@@ -581,8 +648,9 @@ may contain sensitive data.
 
 ### v0.1 scope
 
-The first release focuses on tools. Legacy SSE transport, MCP Apps, resource
-browsing, prompt commands, roots, sampling, and elicitation are not supported.
+The first release focused on tools; resource discovery and on-demand reading are
+now supported too. Legacy SSE transport, MCP Apps, resource templates and
+subscriptions, prompt commands, roots, sampling, and elicitation aren't supported.
 See the [post-v0.1 backlog](https://github.com/mavam/pi-mcp-client/blob/main/TODO.md)
 for follow-up work; it is not a release commitment.
 

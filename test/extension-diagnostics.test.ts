@@ -199,7 +199,7 @@ test("logout accepts disabled servers, preserves configuration, and explains ext
   const disconnect = spyOn(McpRuntime.prototype, "disconnect");
   const discover = spyOn(McpRuntime.prototype, "discover").mockResolvedValue({
     tools: [prepareTool("example", "fixture", { name: "echo", inputSchema: { type: "object" } })],
-    diagnostics: [], unavailable: [], warnings: [],
+    resources: [], diagnostics: [], unavailable: [], warnings: [],
   });
   try {
     h.setActiveTools(["mcp_tools", "unrelated"]);
@@ -430,9 +430,35 @@ test("typos fail with catalog suggestions, while partial activation succeeds", a
   expect(h.hooks.get("tool_result")({ toolName: "mcp_tools", details: partial.details })).toBeUndefined();
 });
 
+test("reads and activation share target rows and distinguish new from active tools", async () => {
+  const h = await host(JSON.stringify({ mcpServers: { example: fixtureServer } }));
+  const updates: any[] = [];
+  const activated = await h.execute("mcp_tools", { activate: ["example.echo", "example.fail"] }, (result) => updates.push(result));
+  expect(updates[0].details.rows).toEqual([
+    { label: "example · echo", state: "running" },
+    { label: "example · fail", state: "running" },
+  ]);
+  expect(activated.details.rows).toEqual([
+    { label: "example · echo", state: "done" },
+    { label: "example · fail", state: "done" },
+  ]);
+  const repeated = await h.execute("mcp_tools", { activate: ["mcp__example__echo", "example.missing"] });
+  expect(repeated.details.rows[0]).toEqual({ label: "example · echo", state: "active" });
+  expect(repeated.details.rows[1]).toMatchObject({ label: "example · missing", state: "failed" });
+  expect(repeated.details.rows[1].inlineDescription).toContain("unknown identifier");
+  updates.length = 0;
+  const read = await h.execute("mcp_tools", { read: { server: "example", uri: "schema://analytics" } }, (result) => updates.push(result));
+  expect(updates[0].details.rows).toEqual([{ label: "example · schema://analytics", state: "running" }]);
+  expect(read.details.rows).toEqual([{ label: "example · schema://analytics", state: "done" }]);
+  const missing = await h.execute("mcp_tools", { read: { server: "example", uri: "schema://missing" } });
+  expect(missing.details.rows[0]).toMatchObject({ label: "example · schema://missing", state: "failed" });
+  expect(missing.details.rows[0].inlineDescription).toContain("not found");
+});
+
 test("invalid argument combinations fail before any discovery or transport work", async () => {
   const h = await host(JSON.stringify({ mcpServers: { example: fixtureServer } }));
   const discover = spyOn(McpRuntime.prototype, "discover");
+  const read = spyOn(McpRuntime.prototype, "readResource");
   try {
     for (const args of [
       {}, { query: "echo", activate: ["example.echo"] }, { server: "example" },
@@ -440,6 +466,14 @@ test("invalid argument combinations fail before any discovery or transport work"
       { activate: ["example.echo"], limit: 5 }, { activate: [] },
       { activate: Array(51).fill("example.echo") }, { activate: [""] },
       { query: " " }, { query: "echo", limit: 0 }, { query: "echo", extra: true },
+      { kind: "all" }, { query: "schema", kind: "invalid" }, { activate: ["example.echo"], kind: "all" },
+      { read: null }, { read: [] }, { read: {} }, { read: { server: "example" } },
+      { read: { server: "example", uri: "relative" } }, { read: { server: "example", uri: "schema://x", extra: true } },
+      { read: { server: "example", uri: "schema://x" }, query: "schema" },
+      { read: { server: "example", uri: "schema://x" }, activate: ["example.echo"] },
+      { read: { server: "example", uri: "schema://x" }, server: "example" },
+      { read: { server: "example", uri: "schema://x" }, kind: "all" },
+      { read: { server: "example", uri: "schema://x" }, limit: 1 },
     ]) {
       const result = await h.execute("mcp_tools", args);
       expect(result.details.failed).toBe(true);
@@ -448,8 +482,51 @@ test("invalid argument combinations fail before any discovery or transport work"
       expect(result.content[0].text).toContain("activate");
     }
     expect(discover).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
     expect(h.activeTools()).toEqual(["mcp_tools"]);
-  } finally { discover.mockRestore(); }
+  } finally { discover.mockRestore(); read.mockRestore(); }
+});
+
+test("resource discovery and reading work headlessly without tool activation", async () => {
+  const h = await host(JSON.stringify({ mcpServers: { example: fixtureServer } }));
+  h.ctx.hasUI = false;
+  h.setActiveTools(["mcp_tools", "unrelated"]);
+  const read = spyOn(McpRuntime.prototype, "readResource");
+  try {
+    const discovered = await h.execute("mcp_tools", { query: "analytics" });
+    expect(discovered.details.candidates).toHaveLength(1);
+    expect(discovered.details.candidates[0].kind).toBe("resource");
+    expect(JSON.stringify(discovered.content)).not.toContain("events");
+    expect(read).not.toHaveBeenCalled();
+    const result = await h.execute("mcp_tools", discovered.details.candidates[0].nextCall);
+    expect(result.details.resource).toEqual({ server: "example", uri: "schema://analytics" });
+    expect(JSON.stringify(result.content)).toContain("events");
+    expect(result.details.loaded).toBeUndefined();
+    expect(result.details.candidates).toBeUndefined();
+    expect(h.activeTools()).toEqual(["mcp_tools", "unrelated"]);
+    expect([...h.tools.keys()]).toEqual(["mcp_tools"]);
+    expect(restoredTools([{ type: "message", message: { role: "toolResult", toolName: "mcp_tools", details: result.details } } as any])).toEqual([]);
+    expect((await h.execute("mcp_tools", { query: "analytics", kind: "tools" })).details.candidates).toEqual([]);
+  } finally { read.mockRestore(); }
+});
+
+test("resource reads that finish after reload do not attach stale content", async () => {
+  const h = await host(JSON.stringify({ mcpServers: { example: fixtureServer } }));
+  let finish!: () => void;
+  const read = spyOn(McpRuntime.prototype, "readResource").mockImplementation(async () => {
+    await new Promise<void>((resolve) => { finish = resolve; });
+    return { contents: [{ uri: "schema://analytics", text: "late-content" }] };
+  });
+  try {
+    const pending = h.execute("mcp_tools", { read: { server: "example", uri: "schema://analytics" } });
+    await Promise.resolve();
+    await h.command("reload");
+    finish();
+    const result = await pending;
+    expect(result.details.failed).toBe(true);
+    expect(result.details.diagnostics[0].code).toBe("cancelled");
+    expect(JSON.stringify(result.content)).not.toContain("late-content");
+  } finally { read.mockRestore(); }
 });
 
 test("activation reports restrictions, collisions, and unavailable servers separately", async () => {

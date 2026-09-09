@@ -3,7 +3,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import extension from "../src/index.js";
 import { DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT } from "../src/catalog.js";
 
-test("one flat tool schema supports discovery and activation", () => {
+test("one flat tool schema supports mixed discovery, activation, and resource reading", () => {
   const tools: any[] = [];
   extension({
     registerTool: (tool: any) => tools.push(tool),
@@ -25,4 +25,9 @@ test("one flat tool schema supports discovery and activation", () => {
   expect(schema.properties.limit.default).toBe(DEFAULT_SEARCH_LIMIT);
   expect(schema.properties.activate.minItems).toBe(1);
   expect(schema.properties.activate.maxItems).toBe(MAX_SEARCH_LIMIT);
+  expect(schema.required ?? []).not.toContain("read");
+  expect(schema.properties.kind.enum).toEqual(["all", "tools", "resources"]);
+  expect(schema.properties.read.required).toEqual(["server", "uri"]);
+  expect(schema.properties.read.additionalProperties).toBe(false);
+  expect(schema.properties.read.properties.uri.maxLength).toBe(4096);
 });

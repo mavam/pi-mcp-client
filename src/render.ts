@@ -23,7 +23,7 @@ export function renderCall(
   expanded: boolean,
 ): Component {
   const values = object(args) ? args : {};
-  const preview = title === "mcp activate"
+  const preview = title === "mcp activate" || title === "mcp read"
     ? ""
     : Object.entries(values)
       .map(([key, value]) => `${line(key)}=${line(JSON.stringify(value) ?? "")}`)
