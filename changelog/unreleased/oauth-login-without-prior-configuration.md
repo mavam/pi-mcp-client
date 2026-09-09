@@ -1,6 +1,8 @@
 ---
 title: OAuth login without prior configuration
 type: bugfix
+prs:
+  - 19
 authors:
   - mavam
 created: 2026-09-09T12:21:25.111918Z
