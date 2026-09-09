@@ -41,8 +41,6 @@ and [Claude Code MCP](https://code.claude.com/docs/en/mcp).
   never restored automatically.
 - [x] **Prompts:** Discover and run server-provided prompts with argument entry and
   explicit user selection. Treat prompt content as untrusted server data.
-- [ ] **Roots:** Advertise explicitly authorized workspace roots and notify servers
-  when they change. Roots are scope hints, not a filesystem sandbox.
 - [x] **Tool catalog notifications:** Handle `tools/list_changed` and invalidate
   stale catalogs without silently replacing an active tool contract.
 - [x] **Resource catalog notifications:** Invalidate resource metadata without
@@ -82,8 +80,6 @@ and [Claude Code MCP](https://code.claude.com/docs/en/mcp).
 
 - [ ] **Elicitation:** Handle supported server requests for user input, with explicit
   consent and clear cancellation or refusal in non-interactive sessions.
-- [ ] **Sampling:** Handle server requests for model generation with user approval,
-  model and cost limits, and control over which conversation context is shared.
 - [ ] **MCP Apps:** Investigate a suitable host for interactive tool interfaces.
   Require origin isolation and a permissions model; do not execute arbitrary
   server HTML inside the terminal.
