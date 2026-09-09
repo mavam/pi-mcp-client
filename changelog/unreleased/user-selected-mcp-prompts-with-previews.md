@@ -1,6 +1,8 @@
 ---
 title: User-selected MCP prompts with previews
 type: feature
+prs:
+  - 24
 authors:
   - mavam
 created: 2026-09-09T15:12:47.62601Z
