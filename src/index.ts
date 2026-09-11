@@ -511,7 +511,7 @@ export default function mcpClient(
 
   pi.registerCommand("mcp", {
     description:
-      "Manage MCP servers: add|remove|import --scope global|project, list, status, reload, enable|disable|get|tools|login|logout|reconnect|refresh <server>; prompt <server> [name] [argument=value ...]; subscriptions; subscribe|unsubscribe <server> <uri>",
+      "Show MCP server status; manage servers: add|remove|import --scope global|project, reload, enable|disable|get|tools|login|logout|reconnect|refresh <server>; prompt <server> [name] [argument=value ...]; subscriptions; subscribe|unsubscribe <server> <uri>",
     getArgumentCompletions(prefix) {
       const serverActions = ["enable", "disable", "get", "tools", "prompt", "login", "logout", "reconnect", "refresh", "subscribe", "unsubscribe"];
       const input = prefix.trimStart();
@@ -519,7 +519,7 @@ export default function mcpClient(
       if (configuration !== undefined) return configuration;
       const match = /^(\S+)\s+(.*)$/s.exec(input);
       if (!match) {
-        return ["list", "status", "reload", "subscriptions", "add", "remove", "import", ...serverActions]
+        return ["reload", "subscriptions", "add", "remove", "import", ...serverActions]
           .filter((action) => action.startsWith(input))
           .map((action) => ({ value: action, label: action }));
       }
@@ -542,7 +542,7 @@ export default function mcpClient(
     async handler(args, ctx) {
       const generation = sessionGeneration;
       await ctx.waitForIdle();
-      let [action = "status", server, ...extra] = args
+      let [action = "", server, ...extra] = args
         .trim()
         .split(/\s+/)
         .filter(Boolean);
@@ -696,7 +696,7 @@ export default function mcpClient(
           );
           return;
         }
-        if ((action === "status" || action === "list") && !server) {
+        if (!action) {
           const statuses = current().serverStatuses();
           const loaded = new Map<string, number>();
           for (const name of pi.getActiveTools()) {
@@ -717,7 +717,7 @@ export default function mcpClient(
           config[server].disabled
         )
           throw new CommandUsageError(
-            "Usage: /mcp list|status|reload, /mcp enable|disable|get|tools|login|logout|reconnect|refresh <server>, or /mcp add|remove|import --scope global|project ... . Disabled servers accept enable, disable, get, logout, and scoped removal.",
+            "Usage: /mcp, /mcp reload, /mcp enable|disable|get|tools|login|logout|reconnect|refresh <server>, or /mcp add|remove|import --scope global|project ... . Disabled servers accept enable, disable, get, logout, and scoped removal.",
           );
         if (action === "tools") {
           if (!ctx.hasUI)
@@ -827,7 +827,7 @@ export default function mcpClient(
         }
         else
           throw new CommandUsageError(
-            "Unknown MCP command. Use /mcp list|status|reload or /mcp enable|disable|get|tools|login|logout|reconnect|refresh <server>, or /mcp add|remove|import --scope global|project ... .",
+            "Unknown MCP command. Use /mcp, /mcp reload, or /mcp enable|disable|get|tools|login|logout|reconnect|refresh <server>, or /mcp add|remove|import --scope global|project ... .",
           );
         if (ctx.hasUI)
           ctx.ui.notify(

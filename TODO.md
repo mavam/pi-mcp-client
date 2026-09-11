@@ -10,7 +10,7 @@ not every server or client needs all of them.
 Use familiar command names without copying client-specific behavior. Inspection
 stays redacted, discovery never activates tools, and authentication stays explicit.
 
-- [x] **Command terminology:** Use `/mcp list`, `/mcp get <server>`, and
+- [x] **Command terminology:** Use `/mcp`, `/mcp get <server>`, and
   `/mcp login <server>`. The former `inspect` and `auth` names are not aliases.
 - [x] **Credential lifecycle:** `/mcp logout <server>` and safe authentication
   status in `/mcp get`, including disabled servers. Logout preserves configuration,

@@ -10,7 +10,7 @@ The model's separate interface is documented in the [tool reference](tool-refere
 
 | Command | Purpose |
 | --- | --- |
-| `/mcp`, `/mcp list`, `/mcp status` | Check server status, catalog tool counts, and tools loaded for the model. |
+| `/mcp` | Check server status, catalog tool counts, and tools loaded for the model. |
 | `/mcp add --scope <scope> [options] <server> <url>` | Save an HTTP server without connecting. For stdio, use `<server> -- <command> [args...]`. |
 | `/mcp remove --scope <scope> <server>` | Remove a definition from the selected scope, retaining credentials. |
 | `/mcp import --scope <scope> <path>` | Preview and select servers from Claude/Cursor JSON or Codex TOML, then confirm a scoped import. |

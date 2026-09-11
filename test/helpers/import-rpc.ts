@@ -71,7 +71,7 @@ export async function importThroughRpc(source: string, options: {
             } else { fail("Pi import requested an unexpected UI interaction."); return; }
           } else if (event.type === "response") {
             if (!event.success) { fail("Pi rejected the import RPC command."); return; }
-            if (event.id === "import") send({ id: "status", type: "prompt", message: "/mcp list" });
+            if (event.id === "import") send({ id: "status", type: "prompt", message: "/mcp" });
             if (event.id === "status") send({ id: "messages", type: "get_messages" });
             if (event.id === "messages") {
               if (event.data.messages.length !== 0) { fail("Import unexpectedly added model context."); return; }
