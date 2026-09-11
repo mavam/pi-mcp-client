@@ -1,6 +1,8 @@
 ---
 title: Themed MCP status panel
 type: change
+prs:
+  - 27
 authors:
   - mavam
 created: 2026-09-11T06:15:59.729141Z
