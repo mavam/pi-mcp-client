@@ -9,6 +9,7 @@ test("one flat tool schema supports mixed discovery, activation, and resource re
     registerTool: (tool: any) => tools.push(tool),
     registerCommand: () => {},
     registerMessageRenderer: () => {},
+    registerEntryRenderer: () => {},
     on: () => {},
   } as unknown as ExtensionAPI);
   expect(tools).toHaveLength(1);

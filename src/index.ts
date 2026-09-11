@@ -27,6 +27,7 @@ import { McpRuntime, createSdkConnector, ToolContractError } from "./runtime.js"
 import { Exposure, restoredTools, TOOLS_TOOL } from "./exposure.js";
 import { convertResult, convertResourceResult, textResult, type ClientDetails } from "./output.js";
 import { renderCall, renderResult } from "./render.js";
+import { STATUS_ENTRY, statusPanel, type StatusSnapshot } from "./status-panel.js";
 import {
   diagnose,
   diagnostic,
@@ -74,6 +75,9 @@ export default function mcpClient(
   let loginController: AbortController | undefined;
   let promptController: AbortController | undefined;
   let importController: AbortController | undefined;
+  pi.registerEntryRenderer<StatusSnapshot>(STATUS_ENTRY, (entry, _options, theme) =>
+    statusPanel(entry.data ?? { servers: [], loaded: [] }, theme),
+  );
   pi.registerMessageRenderer("mcp-prompt", (message, { expanded, outputPad }, theme) => {
     const details = object(message.details) ? message.details : {};
     const count = Number(details.count ?? 0);
@@ -699,7 +703,11 @@ export default function mcpClient(
             const tool = exposure.definitions.get(name);
             if (tool) loaded.set(tool.server, (loaded.get(tool.server) ?? 0) + 1);
           }
-          if (ctx.hasUI) ctx.ui.notify(serverMatrix(statuses, loaded), "info");
+          if (ctx.mode === "tui") {
+            pi.appendEntry<StatusSnapshot>(STATUS_ENTRY, { servers: statuses, loaded: [...loaded] });
+          } else if (ctx.hasUI) {
+            ctx.ui.notify(serverMatrix(statuses, loaded), "info");
+          }
           return;
         }
         if (
