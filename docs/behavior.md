@@ -3,7 +3,7 @@
 [Back to the README](../README.md)
 
 This page explains how the extension manages state and displays results. For the
-assistant's tool-call interface, see the [tool reference](tool-reference.md).
+model's tool-call interface, see the [tool reference](tool-reference.md).
 
 ## Sessions
 
@@ -15,7 +15,7 @@ assistant's tool-call interface, see the [tool reference](tool-reference.md).
   Other providers receive the expanded tool list normally.
 - Discovery respects server filters; activation also respects Pi's tool exclusions.
   An explicit tool allowlist must include both `mcp_tools` and the native tools
-  the assistant needs to load.
+  the model needs to load.
 
 ## Resource snapshots
 
@@ -88,7 +88,7 @@ reconnection or configuration reload.
 When a connected server reports a tool-list change, the extension invalidates its
 memory and disk catalogs. The next discovery or activation fetches the current
 list, including new or removed tools. Notifications don't replace active tool
-definitions: the assistant must activate changed schemas again before use. Calls
+definitions: the model must activate changed schemas again before use. Calls
 validate the live catalog before execution and refuse removed or changed tools.
 Disconnected, cache-only searches can't receive notifications and still use the
 24-hour disk-cache expiry.
@@ -115,7 +115,7 @@ indentation and syntax highlighting. Explicit JSON resource MIME types (includin
 `application/*+json`) and structured content identify JSON without guessing.
 Other explicit MIME types stay plain text; unlabeled text is checked for JSON.
 
-Formatting changes only the display, not the response sent to the assistant.
+Formatting changes only the display, not the response sent to the model.
 Invalid or truncated JSON stays plain text. Results that would exceed formatting
 limits also stay plain text. Resource-link MIME types describe the linked content,
 not the displayed link label. Supported images use the existing result display;

@@ -27,16 +27,16 @@ unavailable server isn't an empty catalog.
 | `connection_failed` | Server executable, working directory, endpoint, network, and TLS configuration. |
 | `timeout` | Server responsiveness and the applicable request, secret-command, or OAuth time limit. |
 | `protocol_error` | Server compatibility and the `protocol` setting. |
-| `tool_changed` | Check server filters and ask the assistant to activate the exact tool again for its current schema. Run `/mcp reload` if connection configuration changed. |
+| `tool_changed` | Check server filters and ask the model to activate the exact tool again for its current schema. Run `/mcp reload` if connection configuration changed. |
 | `tool_error` | The server's tool result and inputs; verify the outcome before retrying. |
-| `resource_invalid` | The assistant needs an exact absolute resource URI from discovery or a tool-returned link. |
+| `resource_invalid` | The model needs an exact absolute resource URI from discovery or a tool-returned link. |
 | `resource_not_found` | Refresh resource metadata or obtain a new link. |
-| `resources_unsupported` | Ask the assistant to use the server's tools instead, or choose a resource-capable server. |
-| `completions_unsupported` | Supply known template values; the assistant should ask you if a value is missing. |
-| `completion_invalid` | The assistant needs an advertised template variable and a string prefix. |
-| `subscriptions_unsupported` | Choose a server with subscription support, or ask the assistant to read when needed. |
+| `resources_unsupported` | Ask the model to use the server's tools instead, or choose a resource-capable server. |
+| `completions_unsupported` | Supply known template values; the model should ask you if a value is missing. |
+| `completion_invalid` | The model needs an advertised template variable and a string prefix. |
+| `subscriptions_unsupported` | Choose a server with subscription support, or ask the model to read when needed. |
 | `subscription_limit` | Remove a watch before adding another; the limit is 50 per connection. |
-| `catalog_changed` | Ask the assistant to retry discovery after the server catalog settles. |
+| `catalog_changed` | Ask the model to retry discovery after the server catalog settles. |
 | `oauth_failed` | An unclassified OAuth failure. Check the service's requirements and `/mcp get <server>` for the client type, scopes, and callback URL. Only public/PKCE clients are supported, not clients requiring a secret. |
 | `oauth_client_required` | The server doesn't support dynamic registration. Configure `oauthClientId` for a registered public/PKCE client and register the exact callback URL. Reload, then log in again. |
 | `oauth_registration_rejected` | The server rejected dynamic registration. Check public/native client eligibility and the callback URL, or configure an approved public client ID. |

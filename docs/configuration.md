@@ -2,7 +2,7 @@
 
 [Back to the README](../README.md)
 
-You configure which servers the assistant can access. Add connections to
+You configure which servers the model can access. Add connections to
 `~/.pi/agent/mcp.json`, or `.mcp.json` in a trusted project. For command-based
 setup, see [Add and remove servers](commands.md#add-and-remove-servers). To reuse
 an existing Claude/Cursor JSON or Codex TOML file, see
@@ -119,7 +119,7 @@ server definition:
 
 | Field | Purpose |
 | --- | --- |
-| `description` | Short capability description for the assistant's server directory. |
+| `description` | Short capability description for the model's server directory. |
 | `oauthClientId` | Optional pre-registered public client ID. Supports `${ENV_VAR}` interpolation, not secret commands. |
 | `oauthScopes` | Optional array of 1–100 unique OAuth scope tokens to request at login. Omitted scopes use SDK/server defaults. Values are literal, without interpolation. |
 | `oauthCallbackPort` | Optional loopback callback port, from 1 to 65535. Defaults to `19847`. |
