@@ -2,40 +2,71 @@ import { line, plain, type CatalogTool } from "./catalog.js";
 import { object, resolveServer, usesOAuth, type ServerConfig } from "./config.js";
 import { credentialStore, OAuthProvider, type CredentialStoreFactory, type OAuthIdentity } from "./auth.js";
 import type { ServerStatus } from "./runtime.js";
-import { truncateToWidth } from "@earendil-works/pi-tui";
+import type { Theme } from "@earendil-works/pi-coding-agent";
+import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 
 const serverStates = {
-  disconnected: { glyph: "○", label: "idle" },
-  connected: { glyph: "●", label: "connected" },
-  connecting: { glyph: "▶︎", label: "connecting" },
-  failed: { glyph: "✘︎", label: "error" },
-  disabled: { glyph: "○", label: "disabled" },
+  disconnected: { glyph: "○", label: "idle", color: "muted" },
+  connected: { glyph: "●", label: "connected", color: "success" },
+  connecting: { glyph: "▶︎", label: "connecting", color: "warning" },
+  failed: { glyph: "✘︎", label: "error", color: "error" },
+  disabled: { glyph: "○", label: "disabled", color: "dim" },
 } as const;
 
 export function serverMatrix(
   servers: ServerStatus[],
   loaded: ReadonlyMap<string, number>,
   width = 80,
+  theme?: Pick<Theme, "fg" | "bold">,
 ): string {
   if (width <= 0) return "";
-  const fit = (text: string) => plain(truncateToWidth(text, width));
-  if (!servers.length) return fit("No MCP servers configured.");
-  const nameWidth = Math.min(40, Math.max(6, ...servers.map(({ name }) => name.length)));
-  const heading = `  ${"Server".padEnd(nameWidth)}  ${"State".padEnd(10)}  ${"Tools".padStart(5)}  ${"Loaded".padStart(6)}`;
-  const rows = servers.map((server) => {
+  const fg = (color: Parameters<Theme["fg"]>[0], text: string) => theme ? theme.fg(color, text) : text;
+  const bold = (text: string) => theme ? theme.bold(text) : text;
+  const fit = (text: string) => {
+    const fitted = truncateToWidth(text, width, "…");
+    return theme ? fitted : plain(fitted);
+  };
+  const wrap = (text: string) => wrapTextWithAnsi(text, width).map(fit);
+  const rows: string[] = [];
+  if (!servers.length) return wrap(fg("muted", "No MCP servers configured.")).join("\n");
+
+  const toolsWidth = Math.max(5, ...servers.map((server) => String(server.catalogSize ?? "—").length));
+  const loadedWidth = Math.max(6, ...servers.map((server) => String(loaded.get(server.name) ?? 0).length));
+  // Glyph + gaps + state + numeric columns. Reserve at least 12 cells for names.
+  const fixedWidth = 18 + toolsWidth + loadedWidth;
+  const compact = width < fixedWidth + 12;
+  const nameWidth = Math.max(0, Math.min(40, width - fixedWidth,
+    Math.max(6, ...servers.map(({ name }) => visibleWidth(line(name))))));
+  const padName = (name: string) => {
+    const text = plain(truncateToWidth(line(name), nameWidth, "…"));
+    return text + " ".repeat(Math.max(0, nameWidth - visibleWidth(text)));
+  };
+  if (!compact) rows.push(fg("muted", bold(
+    `  ${"Server".padEnd(nameWidth)}  ${"State".padEnd(10)}  ${"Tools".padStart(toolsWidth)}  ${"Loaded".padStart(loadedWidth)}`,
+  )));
+  for (const server of servers) {
     const state = serverStates[server.state];
-    const name = plain(truncateToWidth(line(server.name), nameWidth)).padEnd(nameWidth);
-    return `${state.glyph} ${name}  ${state.label.padEnd(10)}  ${String(server.catalogSize ?? "—").padStart(5)}  ${String(loaded.get(server.name) ?? 0).padStart(6)}`;
-  });
-  const errors = servers.filter((server) => server.state === "failed" && server.error)
-    .map((server) => `✘︎ ${line(server.name)}: [${server.error!.code}] ${line(server.error!.message)}`);
-  return [
-    heading,
-    ...rows,
-    "",
-    "Connections open on demand. — = catalog not fetched.",
-    ...errors,
-  ].map(fit).join("\n");
+    const count = loaded.get(server.name) ?? 0;
+    const tools = String(server.catalogSize ?? "—");
+    const name = fg(server.state === "disabled" ? "dim" : "text", bold(compact ? line(server.name) : padName(server.name)));
+    const glyph = fg(state.color, state.glyph);
+    if (compact) {
+      rows.push(...wrap(`${glyph} ${name}`));
+      rows.push(...wrap(`  ${fg(state.color, state.label)} · ${fg("muted", `${tools} tools · ${count} loaded`)}`));
+    } else {
+      rows.push(`${glyph} ${name}  ${fg(state.color, state.label.padEnd(10))}  ` +
+        fg(server.catalogSize === undefined ? "dim" : "text", tools.padStart(toolsWidth)) + "  " +
+        fg(count ? "accent" : "dim", String(count).padStart(loadedWidth)));
+    }
+  }
+  rows.push("", ...wrap(fg("dim", "Connections open on demand. — = catalog not fetched.")));
+  const errors = servers.filter((server) => server.state === "failed" && server.error);
+  if (errors.length) rows.push("");
+  for (const server of errors) {
+    rows.push(...wrap(fg("error", `✘︎ ${line(server.name)}: [${line(server.error!.code)}]`) +
+      fg("muted", ` ${line(server.error!.message)}`)));
+  }
+  return rows.map(fit).join("\n");
 }
 
 /** Pi's string selector uses two columns of padding and a two-column marker. */

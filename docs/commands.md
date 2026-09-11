@@ -2,15 +2,15 @@
 
 [Back to the README](../README.md)
 
-These are commands **you run in Pi**, not tools the assistant calls. Use them to
-manage servers, inspect capabilities, use prompts, and watch resource changes. The assistant's
-separate interface is documented in the [tool reference](tool-reference.md).
+These are commands **you run in Pi**, not tools the model calls. Use them to
+manage servers, inspect capabilities, use prompts, and watch resource changes.
+The model's separate interface is documented in the [tool reference](tool-reference.md).
 
 ## Command reference
 
 | Command | Purpose |
 | --- | --- |
-| `/mcp`, `/mcp list`, `/mcp status` | Show a server status matrix with catalog and loaded-tool counts. |
+| `/mcp` | Check server status, catalog tool counts, and tools loaded for the model. |
 | `/mcp add --scope <scope> [options] <server> <url>` | Save an HTTP server without connecting. For stdio, use `<server> -- <command> [args...]`. |
 | `/mcp remove --scope <scope> <server>` | Remove a definition from the selected scope, retaining credentials. |
 | `/mcp import --scope <scope> <path>` | Preview and select servers from Claude/Cursor JSON or Codex TOML, then confirm a scoped import. |
@@ -33,11 +33,16 @@ See [Authentication](authentication.md) for login and logout procedures, and
 
 ## Inspect servers and tools
 
-The `/mcp` status matrix distinguishes idle (`○`), connected (`●`), connecting
-(`▶︎`), disabled (`○`), and failed (`✘︎`) servers. Idle is normal: connections open
-on demand. A dash (`—`) means the catalog hasn't been fetched, not that the server
-has no tools. The **Loaded** column counts tools currently active for the
-assistant.
+Use `/mcp` to check your setup or investigate a connection problem. It reports
+whether each server is idle, connected, connecting, disabled, or in an error
+state, along with catalog tool counts and tools loaded for the model.
+
+Idle is normal: connections open on demand. A dash (`—`) means the catalog hasn't
+been fetched, not that the server has no tools. **Loaded** counts tools currently
+active for the model.
+
+Checking status doesn't open connections or send information to the model.
+The result stays in your transcript; run the command again for updated status.
 
 Use `/mcp get <server>` to check the effective transport, protocol, filters,
 and connection status without connecting or running secret commands. Connection
@@ -48,15 +53,14 @@ unavailable credential store is reported separately from missing tokens. Header
 and stdio credentials are identified as externally managed; inspection never
 executes them.
 
-Use `/mcp tools <server>` to fetch the current catalog and browse a scrollable
-list. Rows show tool names and descriptions, trimmed to the terminal width with
-an ellipsis. Select a tool to see a multiline signature and parameter details,
-with each parameter in a separate paragraph. Browsing respects your include and
-exclude filters and doesn't activate tools or add their schemas to the assistant's
-context. This command requires an interactive UI.
+Use `/mcp tools <server>` to find out what a server can do. It fetches the current
+catalog so you can inspect tool descriptions, parameters, and required inputs.
+Browsing respects your include and exclude filters and doesn't activate tools
+or add their schemas to the model's context. This command requires an
+interactive UI.
 
 Refreshing a catalog doesn't replace active tool definitions. After a schema
-change, ask the assistant to activate the exact tool again. See
+change, ask the model to activate the exact tool again. See
 [tool changes and caching](behavior.md#discovery-and-caching). Failed tool calls
 aren't retried automatically; verify whether an interrupted operation completed
 before trying again.
@@ -108,7 +112,7 @@ Both commands wait for active agent work to finish, then
 [apply the configuration](configuration.md#apply-changes).
 
 Disabling removes the server from discovery and deactivates its tools. Enabling
-doesn't connect, authenticate, or load tools; ask the assistant to discover the
+doesn't connect, authenticate, or load tools; ask the model to discover the
 capabilities you need.
 
 ## Add and remove servers
@@ -282,7 +286,7 @@ streams. It never opens the URI as a file or generic URL.
 An update marks the watch as changed (`↻`) and shows a UI notification. Repeated
 updates coalesce into that marker until you unsubscribe. No content is fetched,
 no model turn starts, and existing resource results remain unchanged. Ask the
-assistant to read the resource for a new snapshot; unsubscribe and subscribe again
+model to read the resource for a new snapshot; unsubscribe and subscribe again
 to reset the change marker.
 
 Watches are memory-only, limited to 50 per server connection, and require an

@@ -2,7 +2,7 @@
 
 [Back to the README](../README.md)
 
-You manage authentication through `/mcp login` and `/mcp logout`. The assistant
+You manage authentication through `/mcp login` and `/mcp logout`. The model
 can't initiate an OAuth login: only your explicit login command opens the browser.
 For externally managed bearer tokens, use
 [headers and secret commands](configuration.md#secret-commands) instead.

@@ -27,6 +27,7 @@ import { McpRuntime, createSdkConnector, ToolContractError } from "./runtime.js"
 import { Exposure, restoredTools, TOOLS_TOOL } from "./exposure.js";
 import { convertResult, convertResourceResult, textResult, type ClientDetails } from "./output.js";
 import { renderCall, renderResult } from "./render.js";
+import { STATUS_ENTRY, statusPanel, type StatusSnapshot } from "./status-panel.js";
 import {
   diagnose,
   diagnostic,
@@ -74,6 +75,9 @@ export default function mcpClient(
   let loginController: AbortController | undefined;
   let promptController: AbortController | undefined;
   let importController: AbortController | undefined;
+  pi.registerEntryRenderer<StatusSnapshot>(STATUS_ENTRY, (entry, _options, theme) =>
+    statusPanel(entry.data ?? { servers: [], loaded: [] }, theme),
+  );
   pi.registerMessageRenderer("mcp-prompt", (message, { expanded, outputPad }, theme) => {
     const details = object(message.details) ? message.details : {};
     const count = Number(details.count ?? 0);
@@ -507,7 +511,7 @@ export default function mcpClient(
 
   pi.registerCommand("mcp", {
     description:
-      "Manage MCP servers: add|remove|import --scope global|project, list, status, reload, enable|disable|get|tools|login|logout|reconnect|refresh <server>; prompt <server> [name] [argument=value ...]; subscriptions; subscribe|unsubscribe <server> <uri>",
+      "Show MCP server status; manage servers: add|remove|import --scope global|project, reload, enable|disable|get|tools|login|logout|reconnect|refresh <server>; prompt <server> [name] [argument=value ...]; subscriptions; subscribe|unsubscribe <server> <uri>",
     getArgumentCompletions(prefix) {
       const serverActions = ["enable", "disable", "get", "tools", "prompt", "login", "logout", "reconnect", "refresh", "subscribe", "unsubscribe"];
       const input = prefix.trimStart();
@@ -515,7 +519,7 @@ export default function mcpClient(
       if (configuration !== undefined) return configuration;
       const match = /^(\S+)\s+(.*)$/s.exec(input);
       if (!match) {
-        return ["list", "status", "reload", "subscriptions", "add", "remove", "import", ...serverActions]
+        return ["reload", "subscriptions", "add", "remove", "import", ...serverActions]
           .filter((action) => action.startsWith(input))
           .map((action) => ({ value: action, label: action }));
       }
@@ -538,7 +542,7 @@ export default function mcpClient(
     async handler(args, ctx) {
       const generation = sessionGeneration;
       await ctx.waitForIdle();
-      let [action = "status", server, ...extra] = args
+      let [action = "", server, ...extra] = args
         .trim()
         .split(/\s+/)
         .filter(Boolean);
@@ -692,14 +696,18 @@ export default function mcpClient(
           );
           return;
         }
-        if ((action === "status" || action === "list") && !server) {
+        if (!action) {
           const statuses = current().serverStatuses();
           const loaded = new Map<string, number>();
           for (const name of pi.getActiveTools()) {
             const tool = exposure.definitions.get(name);
             if (tool) loaded.set(tool.server, (loaded.get(tool.server) ?? 0) + 1);
           }
-          if (ctx.hasUI) ctx.ui.notify(serverMatrix(statuses, loaded), "info");
+          if (ctx.mode === "tui") {
+            pi.appendEntry<StatusSnapshot>(STATUS_ENTRY, { servers: statuses, loaded: [...loaded] });
+          } else if (ctx.hasUI) {
+            ctx.ui.notify(serverMatrix(statuses, loaded), "info");
+          }
           return;
         }
         if (
@@ -709,7 +717,7 @@ export default function mcpClient(
           config[server].disabled
         )
           throw new CommandUsageError(
-            "Usage: /mcp list|status|reload, /mcp enable|disable|get|tools|login|logout|reconnect|refresh <server>, or /mcp add|remove|import --scope global|project ... . Disabled servers accept enable, disable, get, logout, and scoped removal.",
+            "Usage: /mcp, /mcp reload, /mcp enable|disable|get|tools|login|logout|reconnect|refresh <server>, or /mcp add|remove|import --scope global|project ... . Disabled servers accept enable, disable, get, logout, and scoped removal.",
           );
         if (action === "tools") {
           if (!ctx.hasUI)
@@ -819,7 +827,7 @@ export default function mcpClient(
         }
         else
           throw new CommandUsageError(
-            "Unknown MCP command. Use /mcp list|status|reload or /mcp enable|disable|get|tools|login|logout|reconnect|refresh <server>, or /mcp add|remove|import --scope global|project ... .",
+            "Unknown MCP command. Use /mcp, /mcp reload, or /mcp enable|disable|get|tools|login|logout|reconnect|refresh <server>, or /mcp add|remove|import --scope global|project ... .",
           );
         if (ctx.hasUI)
           ctx.ui.notify(

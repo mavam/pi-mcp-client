@@ -25,12 +25,16 @@ async function host(configuration: string, excluded: string[] = [], credentialSt
   const commands = new Map<string, any>();
   const notifications: string[] = [];
   const messages: { message: any; options: any }[] = [];
+  const entries: { customType: string; data: any }[] = [];
+  const entryRenderers = new Map<string, any>();
   let active = ["mcp_tools"];
   extension(
     {
       registerTool: (tool: any) => tools.set(tool.name, tool),
       registerCommand: (name: string, command: any) => commands.set(name, command),
       registerMessageRenderer: () => {},
+      registerEntryRenderer: (name: string, renderer: any) => entryRenderers.set(name, renderer),
+      appendEntry: (customType: string, data: any) => entries.push({ customType, data }),
       sendMessage: (message: any, options: any) => messages.push({ message, options }),
       on: (name: string, fn: any) => hooks.set(name, fn),
       getActiveTools: () => active,
@@ -73,9 +77,72 @@ async function host(configuration: string, excluded: string[] = [], credentialSt
     execute,
     notifications,
     messages,
+    entries,
+    entryRenderers,
     command: (args: string) => commands.get("mcp").handler(args, ctx),
   };
 }
+
+test("bare mcp renders transcript snapshots without connecting or sending model messages", async () => {
+  const h = await host(JSON.stringify({ mcpServers: { example: fixtureServer } }));
+  h.ctx.mode = "tui";
+  const notifications = h.notifications.length;
+  await h.command("");
+  expect(h.entries).toHaveLength(1);
+  expect(h.entries[0].customType).toBe("mcp-status");
+  expect(h.entries[0].data).toEqual({
+    servers: [{ name: "example", state: "disconnected", catalogSize: undefined, error: undefined }],
+    loaded: [],
+  });
+  expect(h.entryRenderers.has("mcp-status")).toBe(true);
+  expect(h.notifications).toHaveLength(notifications);
+  expect(h.messages).toHaveLength(0);
+  expect(h.activeTools()).toEqual(["mcp_tools"]);
+  expect([...h.tools.keys()]).toEqual(["mcp_tools"]);
+
+  await h.execute("mcp_tools", { activate: ["example.echo"] });
+  await h.command("");
+  expect(h.entries.at(-1)?.data.loaded).toEqual([["example", 1]]);
+  expect(h.entries.at(-1)?.data.servers[0].state).toBe("connected");
+  expect(h.entries[0].data.servers[0].state).toBe("disconnected");
+});
+
+test("removed status aliases fail without connecting or rendering a panel", async () => {
+  const h = await host(JSON.stringify({ mcpServers: { example: fixtureServer } }));
+  h.ctx.mode = "tui";
+  for (const action of ["list", "status", "list example", "status example"]) {
+    await h.command(action);
+    expect(h.notifications.at(-1)).toContain("/mcp");
+    expect(h.notifications.at(-1)).toMatch(/Usage:|Unknown MCP command/);
+  }
+  const completions = h.commands.get("mcp").getArgumentCompletions("");
+  expect(completions.map((item: { value: string }) => item.value)).not.toContain("list");
+  expect(completions.map((item: { value: string }) => item.value)).not.toContain("status");
+  expect(h.entries).toHaveLength(0);
+  expect(h.messages).toHaveLength(0);
+  expect(h.activeTools()).toEqual(["mcp_tools"]);
+  expect([...h.tools.keys()]).toEqual(["mcp_tools"]);
+  await h.command("");
+  expect(h.entries[0].data.servers[0].state).toBe("disconnected");
+});
+
+test("RPC status stays plain text and non-UI modes do not emit panels", async () => {
+  const h = await host(JSON.stringify({ mcpServers: {} }));
+  h.ctx.mode = "rpc";
+  await h.command("");
+  expect(h.notifications.at(-1)).toContain("No MCP servers configured.");
+  expect(h.notifications.at(-1)).not.toContain("\x1b");
+  expect(h.entries).toHaveLength(0);
+  const notifications = h.notifications.length;
+  h.ctx.hasUI = false;
+  for (const mode of ["print", "json"]) {
+    h.ctx.mode = mode;
+    await h.command("");
+  }
+  expect(h.notifications).toHaveLength(notifications);
+  expect(h.entries).toHaveLength(0);
+  expect(h.messages).toHaveLength(0);
+});
 
 test("add is lazy and remove deactivates affected tools without touching credentials", async () => {
   let credentialAccesses = 0;
@@ -688,7 +755,7 @@ test("command completion suggests actions first and servers only after an action
   } }));
   const complete = h.commands.get("mcp").getArgumentCompletions;
   expect(complete("")).toEqual(
-    ["list", "status", "reload", "subscriptions", "add", "remove", "import", "enable", "disable", "get", "tools", "prompt", "login", "logout", "reconnect", "refresh", "subscribe", "unsubscribe"]
+    ["reload", "subscriptions", "add", "remove", "import", "enable", "disable", "get", "tools", "prompt", "login", "logout", "reconnect", "refresh", "subscribe", "unsubscribe"]
       .map((value) => ({ value, label: value })),
   );
   expect(complete("to")).toEqual([{ value: "tools", label: "tools" }]);
@@ -841,7 +908,7 @@ test("reload retains unchanged active definitions and unrelated tools, but not i
   await h.command("reload");
   expect(h.activeTools()).toEqual(["mcp_tools", "unrelated", echo]);
   expect(h.activeTools()).not.toContain(fail);
-  await h.command("status");
+  await h.command("");
   expect(h.notifications.at(-1)).toContain("idle");
   const result = await h.execute(echo, { text: "after reload" });
   expect(JSON.stringify(result.content)).toContain("after reload");
@@ -932,19 +999,19 @@ test("empty tool catalogs, picker cancellation, and headless browsing don't acti
   expect(h.activeTools()).toEqual(["mcp_tools"]);
 });
 
-test("list and status show the same matrix without connecting or loading tools", async () => {
+test("bare mcp reports idle and loaded tools without opening connections", async () => {
   const h = await host(JSON.stringify({ mcpServers: { example: fixtureServer } }));
-  await h.command("list");
+  await h.command("");
   const listing = h.notifications.at(-1)!;
   expect(listing).toContain("○ example");
   expect(listing).toContain("idle");
   expect(listing).not.toContain("unknown catalog tools");
   expect(listing).toContain("Connections open on demand");
-  await h.command("status");
+  await h.command("  ");
   expect(h.notifications.at(-1)).toBe(listing);
   expect(h.activeTools()).toEqual(["mcp_tools"]);
   await h.execute("mcp_tools", { activate: ["example.echo"] });
-  await h.command("list");
+  await h.command("");
   expect(h.notifications.at(-1)).toContain("● example");
   expect(h.notifications.at(-1)).toMatch(/connected\s+2\s+1/);
 });
@@ -964,7 +1031,7 @@ test("configuration errors reach search and status without leaking malformed JSO
   const result = await h.execute("mcp_tools", { query: "anything" });
   expect(result.details.failed).toBe(true);
   expect(result.details.diagnostics[0].code).toBe("configuration_invalid");
-  await h.command("status");
+  await h.command("");
   expect(h.notifications.at(-1)).toContain("[configuration_invalid]");
   expect(JSON.stringify([result, h.notifications])).not.toContain("private-token");
 });
@@ -989,7 +1056,7 @@ test("secret failures reach search details, status, and reconnect notifications"
   });
   expect(result.details.rows[0].inlineDescription).not.toContain("[secret_lookup_failed]");
   expect(result.details.rows[0].inlineDescription).not.toStartWith(":");
-  await h.command("status");
+  await h.command("");
   expect(h.notifications.at(-1)).toContain("[secret_lookup_failed]");
   await h.command("reconnect example");
   expect(h.notifications.at(-1)).toContain("[secret_lookup_failed]");

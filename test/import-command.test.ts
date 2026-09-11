@@ -27,7 +27,7 @@ async function host(configuration = document({})) {
   let credentials = 0;
   let messages = 0;
   extension({
-    registerTool: () => {}, registerMessageRenderer: () => {},
+    registerTool: () => {}, registerMessageRenderer: () => {}, registerEntryRenderer: () => {},
     registerCommand: (name: string, command: any) => commands.set(name, command),
     on: (name: string, handler: any) => hooks.set(name, handler),
     getActiveTools: () => active, getAllTools: () => [],
