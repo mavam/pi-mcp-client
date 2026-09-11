@@ -1,0 +1,10 @@
+created: 2026-09-11
+title: A clearer MCP status experience
+intro: >-
+  The MCP status experience is now unified under a single command with a clearer,
+  themed panel. The responsive presentation keeps server states and tool counts readable
+  across terminal sizes while recording status snapshots without extra model or connection
+  activity.
+source:
+  mode: sync-stable-queue
+  previous_stable: v0.7.0
