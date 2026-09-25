@@ -1,4 +1,4 @@
-import { OAuthErrorCode, type FetchLike } from "@modelcontextprotocol/client";
+import { OAuthErrorCode } from "@modelcontextprotocol/client";
 import { failure } from "./diagnostics.js";
 
 const codes = new Set<string>(Object.values(OAuthErrorCode));
@@ -6,7 +6,7 @@ const codes = new Set<string>(Object.values(OAuthErrorCode));
 /** SDK 2.1 logs OAuth recovery causes. Keep token-endpoint payloads out of stderr
  * without replacing its authentication logic or intercepting process-wide logging.
  */
-export const privateOAuthFetch: FetchLike = async (input, init) => {
+export async function privateOAuthFetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
   const tokenRequest = init?.body instanceof URLSearchParams && init.body.has("grant_type");
   if (!tokenRequest) return fetch(input, init);
   try {
@@ -41,4 +41,4 @@ export const privateOAuthFetch: FetchLike = async (input, init) => {
     // classified from the caller's signal, not from this exception's message.
     throw failure("oauth_failed", { operation: "auth" });
   }
-};
+}
