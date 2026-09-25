@@ -117,9 +117,9 @@ test("OAuth credentials bind to server URL and issuer", () => {
     token_type: "Bearer",
     issuer: "https://issuer.example",
   });
-  expect(
+  expect(() =>
     provider.clientInformation({ issuer: "https://other.example" }),
-  ).toBeUndefined();
+  ).toThrow("oauth_issuer_changed");
   expect(provider.tokens({ issuer: "https://other.example" })).toBeUndefined();
   expect(
     new OAuthProvider({ server: "example", url: "https://a.example/mcp" }, storage).tokens()?.access_token,
