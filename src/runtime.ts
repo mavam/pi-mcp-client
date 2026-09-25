@@ -33,6 +33,7 @@ import {
 import { prepareTool, type CatalogTool } from "./catalog.js";
 import { prepareResource, prepareResourceTemplate, validTemplateRead, validResourceUri, validCompletion, type CompletionTarget, type TemplateTarget, type CatalogResource, type DiscoveryKind } from "./resources.js";
 import { connectionAuthProvider, credentialStore, type CredentialStoreFactory } from "./auth.js";
+import { privateOAuthFetch } from "./oauth-fetch.js";
 import { preparePrompt, validPromptArguments, type CatalogPrompt } from "./prompts.js";
 import { ResourceSubscriptions } from "./subscriptions.js";
 import { resolveSecrets } from "./secrets.js";
@@ -238,7 +239,7 @@ export const createSdkConnector = (storeFactory: CredentialStoreFactory = creden
           );
           timer.unref();
           try {
-            const response = await fetch(input, {
+            const response = await privateOAuthFetch(input, {
               ...init,
               signal: AbortSignal.any([
                 signal,
