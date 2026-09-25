@@ -3,7 +3,9 @@ title: Explicit approval for additional OAuth permissions
 type: feature
 authors:
   - mavam
-created: 2026-09-25T11:25:43.355712Z
+prs:
+  - 32
+created: 2026-09-25T11:28:22.245105Z
 ---
 
 When an MCP server requires additional OAuth permissions, the operation now stops with a request to review them. Run `/mcp login example` to inspect the requested scope names and approve a fresh login that retains configured and previously granted scopes.
