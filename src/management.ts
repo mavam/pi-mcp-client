@@ -175,6 +175,7 @@ export function inspectServer(
     ...(usesOAuth(config) ? [
       `Requested scopes: ${config.oauthScopes?.map(line).join(", ") ?? "SDK/server defaults"}`,
       `OAuth callback: http://127.0.0.1:${config.oauthCallbackPort ?? 19847}/callback`,
+      `DPoP: ${config.oauthDpop ? "enabled (ES256; token binding depends on the service)" : "disabled"}`,
     ] : []),
     ...(authentication ? [`Authentication: ${authentication}`] : []),
     `Timeout: ${config.timeoutMs ? `${config.timeoutMs} ms` : "default"}`,

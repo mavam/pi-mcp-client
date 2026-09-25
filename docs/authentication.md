@@ -200,6 +200,46 @@ sharing a name, URL, and client ID still share credentials. Explicit login renew
 dynamic registration when its requested options change. `/mcp get example` shows
 the requested scopes and callback address without connecting.
 
+## Use DPoP-bound tokens
+
+DPoP binds an access token to a signing key, so possession of the token alone
+isn't enough to use it. Enable it for an OAuth HTTP server whose service supports
+ES256 proofs:
+
+```json
+{
+  "mcpServers": {
+    "example": {
+      "url": "https://mcp.example.com/mcp",
+      "oauthDpop": true
+    }
+  }
+}
+```
+
+Run `/mcp reload`, then `/mcp login example`. For a new definition, you can use
+`/mcp add --scope global --oauth-dpop example https://mcp.example.com/mcp`.
+
+Only explicit login creates a key. The private key stays in the OS credential
+store alongside the named server's OAuth credentials, bound to its issuer and
+registered client. Connections and token refreshes reuse it across sessions;
+proofs and server nonces aren't persisted. There is no plaintext fallback, and
+keys aren't stored in configuration or session history. This protects keys at
+rest, not against a compromised Pi process or OS account.
+
+The SDK signs fresh request proofs and handles bounded nonce challenges. Enabling
+DPoP requests proof support; it doesn't require the service to issue bound tokens.
+If the service issues Bearer access tokens, resource requests still use Bearer
+authentication. Refresh tokens can be DPoP-bound independently; their binding is
+retained even if the access token is Bearer or the signing key is lost.
+`/mcp get example` shows whether DPoP is configured, not whether a grant is bound.
+
+If a bound access or refresh token's key is missing, sign in again at the same issuer. If the key is corrupt, use
+`/mcp logout example` before signing in. Disabling DPoP doesn't convert bound
+tokens to Bearer tokens: enable it again or log out and obtain a new grant.
+Logout removes the key and tokens locally and attempts remote token revocation.
+A changed issuer requires explicit logout before trusting its replacement.
+
 ## Approve additional permissions
 
 A server can reject a request with an OAuth scope challenge—for example, when

@@ -4,6 +4,7 @@ import {
   auth,
   discoverOAuthServerInfo,
   type OAuthClientProvider,
+  type DpopSession,
   type OAuthClientInformationContext,
   type OAuthClientMetadata,
   type OAuthDiscoveryState,
@@ -13,9 +14,10 @@ import {
 import { fingerprint, object, usesOAuth, type ServerConfig, type ClientOptions } from "./config.js";
 import { oauthCallbackHtml } from "./oauth-page.js";
 import { privateOAuthFetch } from "./oauth-fetch.js";
+import { createDpopKey, restoreDpopSession, type StoredDpopKey } from "./dpop.js";
 import { diagnose, DiagnosticError, failure } from "./diagnostics.js";
 
-export type OAuthOptions = Pick<ClientOptions, "oauthScopes" | "oauthCallbackPort">;
+export type OAuthOptions = Pick<ClientOptions, "oauthScopes" | "oauthCallbackPort" | "oauthDpop">;
 export function callbackUrl(options: OAuthOptions = {}): string {
   return `http://127.0.0.1:${options.oauthCallbackPort ?? 19847}/callback`;
 }
@@ -45,6 +47,10 @@ interface Credentials extends OAuthIdentity {
   clients: Record<string, StoredOAuthClientInformation>;
   registrations?: Record<string, { redirect: string; scope?: string }>;
   tokens?: StoredOAuthTokens;
+  dpopKey?: StoredDpopKey;
+  /** Grant trust and refresh binding survive key loss and SDK token invalidation. */
+  grantIssuer?: string;
+  dpopRefreshBound?: boolean;
 }
 export interface SecretStore {
   read(): string | null;
@@ -104,13 +110,14 @@ export class OAuthProvider implements OAuthClientProvider {
   private verifier?: string;
   private discovery?: OAuthDiscoveryState;
   private requestedScope?: string;
+  private dpopSession?: Promise<DpopSession>;
   readonly expectedState = randomUUID();
   private readonly clientId?: string;
   constructor(
     identity: OAuthIdentity,
     private readonly store: SecretStore,
     private readonly redirect?: (url: URL) => void | Promise<void>,
-    options: OAuthOptions = {},
+    private readonly options: OAuthOptions = {},
   ) {
     const { server, url, clientId } = identity;
     this.clientId = clientId;
@@ -152,6 +159,10 @@ export class OAuthProvider implements OAuthClientProvider {
   clientInformation(ctx?: OAuthClientInformationContext) {
     this.assertCurrent();
     if (!ctx) return undefined;
+    const grantIssuer = this.data.grantIssuer ?? this.data.tokens?.issuer;
+    if ((grantIssuer && grantIssuer !== ctx.issuer) ||
+        (this.data.dpopKey && this.data.dpopKey.issuer !== ctx.issuer))
+      throw failure("oauth_issuer_changed", { operation: "auth", oauth: true });
     const stored = Object.hasOwn(this.data.clients, ctx.issuer) ? this.data.clients[ctx.issuer] : undefined;
     if (!this.clientId) {
       // Fresh explicit grants must use a registration matching the requested
@@ -178,9 +189,11 @@ export class OAuthProvider implements OAuthClientProvider {
     if (this.clientId && (info.client_id !== this.clientId || info.client_secret))
       throw new Error("Cannot replace the configured public OAuth client.");
     const previous = this.data.clients[ctx.issuer];
-    if (!this.clientId && previous && previous.client_id !== info.client_id &&
-        this.data.tokens?.issuer === ctx.issuer)
-      delete this.data.tokens; // A replacement registration cannot refresh the old client's grant.
+    if (!this.clientId && previous && previous.client_id !== info.client_id) {
+      if (this.data.tokens?.issuer === ctx.issuer) delete this.data.tokens;
+      delete this.data.dpopKey;
+      this.dpopSession = undefined;
+    }
     this.data.clients = { ...this.data.clients, [ctx.issuer]: info };
     if (!this.clientId) this.data.registrations = {
       ...this.data.registrations,
@@ -194,6 +207,9 @@ export class OAuthProvider implements OAuthClientProvider {
     return !ctx || tokens?.issuer === ctx.issuer ? tokens : undefined;
   }
   saveTokens(tokens: StoredOAuthTokens) {
+    if (tokens.token_type?.toLowerCase() === "dpop" &&
+        (!this.options.oauthDpop || !this.data.dpopKey || this.data.dpopKey.issuer !== tokens.issuer))
+      throw failure("oauth_dpop_unavailable", { operation: "auth" });
     if (this.clientId) {
       if (!tokens.issuer) throw new Error("OAuth tokens have no issuer.");
       const info = this.clientInformation({ issuer: tokens.issuer })!;
@@ -201,8 +217,46 @@ export class OAuthProvider implements OAuthClientProvider {
     }
     const scope = tokens.scope ?? this.requestedScope ??
       (tokens.issuer === this.data.tokens?.issuer ? this.data.tokens?.scope : undefined);
+    this.data.dpopRefreshBound = !!tokens.refresh_token && (!!this.dpopSession ||
+      (!!this.data.dpopRefreshBound && tokens.refresh_token === this.data.tokens?.refresh_token));
+    this.data.grantIssuer = tokens.issuer ?? this.data.grantIssuer;
     this.data.tokens = { ...tokens, ...(scope !== undefined ? { scope } : {}) };
     this.save();
+  }
+  async dpop(): Promise<DpopSession | undefined> {
+    this.assertCurrent();
+    // An AS can issue Bearer access tokens with DPoP-bound refresh tokens.
+    const bound = this.data.tokens?.token_type?.toLowerCase() === "dpop" ||
+      (!!this.data.tokens?.refresh_token && !!this.data.dpopRefreshBound);
+    if (!this.options.oauthDpop) {
+      if (bound) throw failure("oauth_dpop_unavailable", { operation: "auth" });
+      return undefined;
+    }
+    const issuer = this.discovery?.authorizationServerMetadata?.issuer ?? this.discovery?.authorizationServerUrl ?? this.data.tokens?.issuer;
+    const client = issuer ? this.clientInformation({ issuer }) : undefined;
+    if (!issuer || !client) {
+      if (bound) throw failure("oauth_dpop_unavailable", { operation: "auth" });
+      return undefined;
+    }
+    if (!this.data.dpopKey && !this.redirect) {
+      if (bound) throw failure("oauth_dpop_unavailable", { operation: "auth" });
+      return undefined; // Only explicit login creates signing keys.
+    }
+    if (this.data.dpopKey && (this.data.dpopKey.issuer !== issuer || this.data.dpopKey.clientId !== client.client_id))
+      throw failure("oauth_dpop_unavailable", { operation: "auth" });
+    this.dpopSession ??= (async () => {
+      if (!this.data.dpopKey) {
+        const key = await createDpopKey(issuer, client.client_id);
+        this.assertCurrent();
+        this.data.dpopKey = key;
+        this.save();
+      }
+      try { return await restoreDpopSession(this.data.dpopKey); }
+      catch { throw failure("oauth_dpop_unavailable", { operation: "auth" }); }
+    })();
+    const session = await this.dpopSession;
+    this.assertCurrent();
+    return session;
   }
   saveCodeVerifier(value: string) {
     this.verifier = value;
@@ -236,6 +290,8 @@ export class OAuthProvider implements OAuthClientProvider {
     if (scope === "all" || scope === "client") {
       this.data.clients = {};
       delete this.data.registrations;
+      delete this.data.dpopKey;
+      this.dpopSession = undefined;
     }
     if (scope === "all" || scope === "tokens") delete this.data.tokens;
     if (scope === "all" || scope === "verifier") this.verifier = undefined;
@@ -281,6 +337,14 @@ export async function connectionAuthProvider(
         // An unavailable store must not block an anonymous/public connection.
         // Keep the rejected promise: a later OAuth challenge fails closed in get().
         if (!initialized && !ctx && error instanceof DiagnosticError &&
+            error.diagnostic.code === "credential_store_unavailable") return undefined;
+        throw error;
+      }
+    },
+    dpop: async () => {
+      try { return await (await get()).dpop(); }
+      catch (error) {
+        if (!initialized && error instanceof DiagnosticError &&
             error.diagnostic.code === "credential_store_unavailable") return undefined;
         throw error;
       }

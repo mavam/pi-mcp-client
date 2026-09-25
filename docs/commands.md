@@ -145,6 +145,7 @@ Windows paths with backslashes, single quotes preserve the path verbatim.
 | `--oauth-client-id ID` | Use a pre-registered public client. |
 | `--oauth-scope SCOPE` | Request an OAuth scope. Repeat for additional scopes. |
 | `--oauth-callback-port PORT` | Set the loopback callback port. |
+| `--oauth-dpop` | Request DPoP-bound OAuth tokens using an OS-backed signing key. |
 
 Retain environment references rather than typing tokens:
 

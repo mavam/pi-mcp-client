@@ -10,6 +10,7 @@ export interface ClientOptions {
   oauthClientId?: string;
   oauthScopes?: string[];
   oauthCallbackPort?: number;
+  oauthDpop?: boolean;
   disabled?: boolean;
   includeTools?: string[];
   excludeTools?: string[];
@@ -39,6 +40,7 @@ const OPTION_FIELDS = [
   "oauthClientId",
   "oauthScopes",
   "oauthCallbackPort",
+  "oauthDpop",
   "disabled",
   "includeTools",
   "excludeTools",
@@ -81,6 +83,7 @@ function validateOptions(
       (!Number.isInteger(entry.oauthCallbackPort) ||
         Number(entry.oauthCallbackPort) < 1 || Number(entry.oauthCallbackPort) > 65535))
     fail("oauthCallbackPort (requires OAuth and a port from 1–65535)");
+  if (entry.oauthDpop !== undefined && typeof entry.oauthDpop !== "boolean") fail("oauthDpop (requires a boolean)");
   if (entry.disabled !== undefined && typeof entry.disabled !== "boolean") fail("disabled");
   for (const field of ["timeoutMs", "startupTimeoutMs", "toolTimeoutMs"]) {
     if (entry[field] !== undefined &&
@@ -152,7 +155,7 @@ function parseConnections(value: unknown, source: string): Config {
       (entry.type === "http" && !entry.url)
     )
       fail("type (must match command or url)");
-    if (entry.command && (entry.headers || entry.oauthClientId !== undefined || entry.oauthScopes !== undefined || entry.oauthCallbackPort !== undefined))
+    if (entry.command && (entry.headers || entry.oauthClientId !== undefined || entry.oauthScopes !== undefined || entry.oauthCallbackPort !== undefined || entry.oauthDpop !== undefined))
       fail("HTTP options on stdio transport");
     if (entry.url && (entry.args || entry.cwd || entry.env))
       fail("stdio options on HTTP transport");
@@ -381,7 +384,7 @@ export function resolveServer(config: ServerConfig, cwd: string): ServerConfig {
     result.url = url.href;
   }
   if (
-    (result.oauthClientId !== undefined || result.oauthScopes !== undefined || result.oauthCallbackPort !== undefined) &&
+    (result.oauthClientId !== undefined || result.oauthScopes !== undefined || result.oauthCallbackPort !== undefined || result.oauthDpop !== undefined) &&
     Object.keys(result.headers ?? {}).some(
       (key) => key.toLowerCase() === "authorization",
     )
