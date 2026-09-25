@@ -137,6 +137,7 @@ server definition:
 | `oauthClientId` | Optional pre-registered public client ID. Supports `${ENV_VAR}` interpolation, not secret commands. |
 | `oauthScopes` | Optional array of 1–100 unique OAuth scope tokens to request at login. Omitted scopes use SDK/server defaults. Values are literal, without interpolation. |
 | `oauthCallbackPort` | Optional loopback callback port, from 1 to 65535. Defaults to `19847`. |
+| `oauthDpop` | Opt in to DPoP proofs with ES256 keys stored in the OS keyring. Defaults to `false`. Run a fresh login after enabling it. |
 | `disabled` | Prevent this server from connecting or exposing tools and resources. |
 | `includeTools` | Optional allowlist of original MCP tool names; `*` matches any sequence. An empty list exposes no tools. |
 | `excludeTools` | Denylist applied after `includeTools`. |
@@ -145,7 +146,7 @@ server definition:
 | `toolTimeoutMs` | Optional timeout for tool calls only, from 100 to 600000 ms. Overrides `timeoutMs` for calls without changing metadata or resource deadlines. Time spent answering [server requests](behavior.md#server-requests-for-input) doesn't count. |
 | `protocol` | `auto` (default) for SDK protocol-version negotiation, or `legacy` for an explicit legacy handshake. |
 
-OAuth client IDs, scopes, and callback ports require HTTP without an Authorization
+OAuth client IDs, scopes, callback ports, and DPoP require HTTP without an Authorization
 header. HTTP authentication is automatic; remove the obsolete `oauth` field from
 existing definitions. See [authentication](authentication.md).
 

@@ -50,6 +50,9 @@ and [Claude Code MCP](https://code.claude.com/docs/en/mcp).
 - [x] **Incremental authorization:** Review request-time scope challenges through
   explicit login, retaining configured and granted scopes without automatic
   browser launch or replay of the rejected operation.
+- [x] **DPoP-bound OAuth tokens:** Opt in to SDK proof and nonce handling, with
+  issuer/client-bound signing keys in the OS credential store and explicit
+  recovery when a key is missing or corrupt.
 - [ ] **Additional OAuth interoperability:** Support confidential pre-registered
   clients and client ID metadata documents where supported by the SDK and server.
   Public pre-registered clients are implemented. Preserve issuer binding and

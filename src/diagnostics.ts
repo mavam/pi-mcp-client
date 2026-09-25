@@ -52,6 +52,7 @@ const messages = {
   oauth_redirect_rejected: "The authorization server rejected the OAuth callback URL.",
   oauth_endpoint_insecure: "The OAuth token endpoint is not secure.",
   oauth_issuer_changed: "The OAuth authorization server changed.",
+  oauth_dpop_unavailable: "The OAuth DPoP signing key is unavailable or DPoP is disabled.",
   callback_unavailable: "The local OAuth callback port is unavailable.",
   busy: "Discovery is still running.",
   operation_failed: "The operation failed.",
@@ -145,6 +146,7 @@ export function diagnostic(
     oauth_redirect_rejected: `Register the exact callback URL shown by /mcp get ${target}, including its host, port, and /callback path. --no-browser uses the same callback URL and does not bypass redirect validation.`,
     oauth_endpoint_insecure: "Use an authorization server with an HTTPS token endpoint. HTTP is only allowed for loopback endpoints; do not disable TLS verification.",
     oauth_issuer_changed: `Verify the server configuration before running /mcp logout ${target} and /mcp login ${target} to trust the new authorization server.`,
+    oauth_dpop_unavailable: `Enable oauthDpop and run /mcp reload, then /mcp login ${target}. If the stored key is corrupt, run /mcp logout ${target} before signing in again. Bound tokens cannot be used as Bearer tokens.`,
     callback_unavailable: `Free the configured callback port, change oauthCallbackPort, or run /mcp login ${target} --no-browser.`,
     busy: "Wait for the current MCP operation to finish, then retry.",
     operation_failed:
