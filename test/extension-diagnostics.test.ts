@@ -115,7 +115,8 @@ for (const outcome of ["approve", "decline", "headless", "reload"] as const) {
       return callback.href;
     };
     if (outcome === "headless") h.ctx.hasUI = false;
-    await h.command("login example --no-browser");
+    if (outcome === "headless") await expect(h.command("login example --no-browser")).rejects.toThrow("interactive session");
+    else await h.command("login example --no-browser");
     expect(confirmations).toBe(outcome === "headless" ? 0 : 1);
     expect(fixture.requests.filter(value => value === "token")).toHaveLength(outcome === "approve" ? 1 : 0);
     expect(fixture.requests.filter(value => value === "tools/call")).toHaveLength(1);
