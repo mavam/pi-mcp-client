@@ -245,7 +245,7 @@ export async function updateServerConfig(
 ): Promise<{ config: Config; scope: ConfigScope }> {
   const scoped = mutation.action !== "toggle";
   if (scoped && mutation.scope === "project" && !trusted)
-    throw new ConfigMutationError("Project configuration requires a trusted project. Use global scope or trust the project first.");
+    throw new ConfigMutationError("Project configuration requires a trusted project. Use global scope, or run /trust to trust this folder first.");
   const paths = [join(agentDir, "mcp.json"), ...(trusted ? [join(cwd, ".mcp.json")] : [])];
   const targets = await Promise.all(paths.map(configTarget));
   if (scoped && targets.length === 2 && targets[0] === targets[1])

@@ -18,19 +18,20 @@ export async function runImportCommand(
   input: string,
   ctx: ExtensionCommandContext,
   agentDir: string,
+  projectTrusted: () => boolean,
   signal: AbortSignal,
   assertCurrent: () => void,
   save: (mutation: Extract<ConfigMutation, { action: "import" }>, guard: () => void) => Promise<unknown>,
 ): Promise<void> {
   if (!ctx.hasUI) throw new ConfigMutationError("Configuration imports require an interactive session (TUI or RPC).");
   const { scope, path } = parseImportCommand(input);
-  const trusted = ctx.isProjectTrusted();
+  const trusted = projectTrusted();
   if (scope === "project" && !trusted)
-    throw new ConfigMutationError("Project configuration requires a trusted project. Use global scope or trust the project first.");
+    throw new ConfigMutationError("Project configuration requires a trusted project. Use global scope, or run /trust to trust this folder first.");
   const guard = () => {
     signal.throwIfAborted();
     assertCurrent();
-    if (ctx.isProjectTrusted() !== trusted)
+    if (projectTrusted() !== trusted)
       throw new ConfigMutationError("Project trust changed during the preview. Run /mcp import again; nothing was saved.");
   };
   const select = async (title: string, choices: string[]) => {

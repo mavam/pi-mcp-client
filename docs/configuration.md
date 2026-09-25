@@ -3,9 +3,10 @@
 [Back to the README](../README.md)
 
 You configure which servers the model can access. Add connections to
-`~/.pi/agent/mcp.json`, or `.mcp.json` in a trusted project. For command-based
-setup, see [Add and remove servers](commands.md#add-and-remove-servers). To reuse
-an existing Claude/Cursor JSON or Codex TOML file, see
+`~/.pi/agent/mcp.json`, or `.mcp.json` in a
+[trusted project](behavior.md#project-trust). For command-based setup, see
+[Add and remove servers](commands.md#add-and-remove-servers). To reuse an
+existing Claude/Cursor JSON or Codex TOML file, see
 [Import server definitions](commands.md#import-server-definitions).
 
 ## Files and transports
@@ -16,8 +17,10 @@ MCP configuration standard. Live configuration must use JSON, not VS Code's
 this format. `PI_CODING_AGENT_DIR` overrides the global Pi directory.
 Project definitions replace same-named global definitions in full; fields and
 filters aren't merged. Untrusted project definitions aren't loaded or edited.
-An explicitly named import source is read as data for review; saving into project
-scope still requires project trust.
+Project servers need an explicit trust decision even in folders that Pi trusts
+implicitly; see [project trust](behavior.md#project-trust). An explicitly named
+import source is read as data for review; saving into project scope still
+requires project trust.
 
 ```json
 {
@@ -44,12 +47,23 @@ scope still requires project trust.
 | `type` | Optional `stdio` or `http`. If omitted, inferred from `command` or `url`. A conflicting type is rejected. |
 | `command`, `args` | Executable and arguments for a stdio server. No shell is used. |
 | `cwd` | Working directory for stdio; defaults to Pi's current directory. Relative paths resolve there. |
-| `env` | Additional environment variables for stdio. |
+| `env` | Environment variables for stdio, in addition to a minimal inherited set. |
 | `url` | Streamable HTTP endpoint; mutually exclusive with `command`. |
 | `headers` | HTTP request headers, including optional bearer authentication. |
 
 Strings in `command`, `args`, `cwd`, `env`, `url`, and `headers` support `${VAR}`
 interpolation. Missing variables prevent that server from connecting.
+
+Stdio servers don't inherit Pi's environment. They receive only the MCP SDK's
+default set (`HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM`, and `USER` on Unix, and
+similar system variables on Windows) plus `env`. Pass other variables a server
+needs explicitly, for example a custom browser location:
+
+```json
+"env": {
+  "PLAYWRIGHT_BROWSERS_PATH": "${PLAYWRIGHT_BROWSERS_PATH}"
+}
+```
 
 Only stdio and Streamable HTTP are supported. The extension rejects `type: "sse"`
 and unsupported connection fields rather than silently changing their meaning.
