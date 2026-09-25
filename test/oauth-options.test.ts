@@ -179,8 +179,8 @@ for (const mode of ["browser", "manual", "cancel", "abort", "denied", "wrong-sta
         expect(tokenRequests).toBe(0);
         expect(store.read()).toBeNull();
       }
-      expect(store.read()).not.toContain("private-code");
-      expect(store.read()).not.toContain("code_verifier");
+      expect(store.read() ?? "").not.toContain("private-code");
+      expect(store.read() ?? "").not.toContain("code_verifier");
     } finally {
       occupied?.stop(true);
       await server.stop(true);
