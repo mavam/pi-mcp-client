@@ -61,8 +61,8 @@ export function authorizationReview(
         truncateToWidth(theme.fg("accent", `Permissions: ${server}`), columns),
         ...lines.slice(offset, offset + size),
         truncateToWidth(`${offset + 1}–${Math.min(offset + size, lines.length)}/${lines.length}`, columns),
-        truncateToWidth(last ? "a: approve · Esc: cancel" : "Enter/↓: next · Esc: cancel", columns),
-        truncateToWidth("↑: previous", columns),
+        truncateToWidth(last ? "a: approve · Esc: cancel" : "Enter/↓: next", columns),
+        truncateToWidth("↑: previous · Esc cancel", columns),
       ];
     },
     handleInput(data) {
