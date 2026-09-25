@@ -47,12 +47,23 @@ requires project trust.
 | `type` | Optional `stdio` or `http`. If omitted, inferred from `command` or `url`. A conflicting type is rejected. |
 | `command`, `args` | Executable and arguments for a stdio server. No shell is used. |
 | `cwd` | Working directory for stdio; defaults to Pi's current directory. Relative paths resolve there. |
-| `env` | Additional environment variables for stdio. |
+| `env` | Environment variables for stdio, in addition to a minimal inherited set. |
 | `url` | Streamable HTTP endpoint; mutually exclusive with `command`. |
 | `headers` | HTTP request headers, including optional bearer authentication. |
 
 Strings in `command`, `args`, `cwd`, `env`, `url`, and `headers` support `${VAR}`
 interpolation. Missing variables prevent that server from connecting.
+
+Stdio servers don't inherit Pi's environment. They receive only the MCP SDK's
+default set (`HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM`, and `USER` on Unix, and
+similar system variables on Windows) plus `env`. Pass other variables a server
+needs explicitly, for example a custom browser location:
+
+```json
+"env": {
+  "PLAYWRIGHT_BROWSERS_PATH": "${PLAYWRIGHT_BROWSERS_PATH}"
+}
+```
 
 Only stdio and Streamable HTTP are supported. The extension rejects `type: "sse"`
 and unsupported connection fields rather than silently changing their meaning.

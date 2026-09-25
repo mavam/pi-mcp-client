@@ -76,6 +76,14 @@ folders that Pi otherwise trusts implicitly. Headless sessions ignore it when no
 decision exists. Run Pi's `/trust` command to save a decision, then run
 `/mcp reload`. See [project trust](behavior.md#project-trust).
 
+## Missing server dependencies
+
+If a stdio server reports a missing browser, SDK, credential, or configuration
+file that works in your shell, it probably reads an environment variable that
+it doesn't receive. Servers don't inherit Pi's environment; pass the variable
+through `env`, for example `PLAYWRIGHT_BROWSERS_PATH`. See
+[files and transports](configuration.md#files-and-transports).
+
 ## Large results
 
 Text output is limited to 2,000 lines or 50 KiB, including resource reads and
