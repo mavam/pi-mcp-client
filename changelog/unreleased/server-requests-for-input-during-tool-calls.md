@@ -3,6 +3,8 @@ title: Server requests for input during tool calls
 type: feature
 authors:
   - mavam
+prs:
+  - 30
 created: 2026-09-25T08:45:57.512037Z
 ---
 
