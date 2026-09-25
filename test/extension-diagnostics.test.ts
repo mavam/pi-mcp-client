@@ -10,6 +10,7 @@ import { prepareTool } from "../src/catalog.js";
 import { preparePrompt } from "../src/prompts.js";
 import { McpRuntime } from "../src/runtime.js";
 import { OAuthProvider, type CredentialStoreFactory } from "../src/auth.js";
+import { scopeServer } from "./helpers/scope-server.js";
 
 const cleanup: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
@@ -86,6 +87,43 @@ async function host(configuration: string, excluded: string[] = [], credentialSt
       if (trusted) new ProjectTrustStore(directory).set(directory, true);
     },
   };
+}
+
+for (const outcome of ["approve", "decline", "headless", "reload"] as const) {
+  test(`incremental login requires explicit approval: ${outcome}`, async () => {
+    const fixture = scopeServer();
+    cleanup.push(async () => { await fixture.stop(); });
+    const h = await host(JSON.stringify({ mcpServers: { example: fixture.config } }), [], async () => fixture.store);
+    await h.execute("mcp_tools", { activate: ["example.write"] });
+    const failed = await h.execute("mcp__example__write", {});
+    expect(JSON.stringify(failed)).toContain("oauth_scope_required");
+    expect(JSON.stringify(failed)).not.toContain("private-");
+    let confirmations = 0;
+    (h.ctx.ui as any).confirm = async (_title: string, message: string) => {
+      confirmations++;
+      expect(message).toContain("write");
+      expect(message).toContain("read");
+      if (outcome === "reload") await h.command("reload");
+      return outcome !== "decline";
+    };
+    (h.ctx.ui as any).input = async (message: string) => {
+      const target = new URL(message.split("Open this URL in a browser:\n")[1].split("\n")[0]);
+      expect(target.searchParams.get("scope")?.split(" ").sort()).toEqual(["read", "write"]);
+      const callback = new URL(target.searchParams.get("redirect_uri")!);
+      callback.searchParams.set("state", target.searchParams.get("state")!);
+      callback.searchParams.set("code", "approved");
+      return callback.href;
+    };
+    if (outcome === "headless") h.ctx.hasUI = false;
+    await h.command("login example --no-browser");
+    expect(confirmations).toBe(outcome === "headless" ? 0 : 1);
+    expect(fixture.requests.filter(value => value === "token")).toHaveLength(outcome === "approve" ? 1 : 0);
+    expect(fixture.requests.filter(value => value === "tools/call")).toHaveLength(1);
+    if (outcome === "approve") {
+      const result = await h.execute("mcp__example__write", {});
+      expect(JSON.stringify(result)).toContain("done");
+    }
+  });
 }
 
 test("bare mcp renders transcript snapshots without connecting or sending model messages", async () => {

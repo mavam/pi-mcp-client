@@ -47,6 +47,9 @@ and [Claude Code MCP](https://code.claude.com/docs/en/mcp).
   fetching content or changing active tools.
 - [x] **Prompt catalog notifications:** Invalidate prompt metadata without fetching
   content or changing previews and accepted snapshots.
+- [x] **Incremental authorization:** Review request-time scope challenges through
+  explicit login, retaining configured and granted scopes without automatic
+  browser launch or replay of the rejected operation.
 - [ ] **Additional OAuth interoperability:** Support confidential pre-registered
   clients and client ID metadata documents where supported by the SDK and server.
   Public pre-registered clients are implemented. Preserve issuer binding and

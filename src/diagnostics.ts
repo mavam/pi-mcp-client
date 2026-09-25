@@ -3,6 +3,7 @@ import {
   OAuthError,
   RegistrationRejectedError,
   InsecureTokenEndpointError,
+  InsufficientScopeError,
   ProtocolError,
   ProtocolErrorCode,
   ResourceNotFoundError,
@@ -46,6 +47,7 @@ const messages = {
   oauth_client_rejected: "The authorization server rejected the OAuth client or its authentication method.",
   oauth_pkce_unsupported: "The authorization server does not support the required S256 PKCE method.",
   oauth_scope_rejected: "The authorization server rejected the requested OAuth scopes.",
+  oauth_scope_required: "The server requires additional OAuth permissions.",
   oauth_grant_rejected: "The OAuth authorization code or refresh token was rejected.",
   oauth_redirect_rejected: "The authorization server rejected the OAuth callback URL.",
   oauth_endpoint_insecure: "The OAuth token endpoint is not secure.",
@@ -137,6 +139,7 @@ export function diagnostic(
     oauth_registration_rejected: `Check whether the service allows public/native client registration and the callback URL shown by /mcp get ${target}. If registration is restricted, configure an approved public client with oauthClientId, run /mcp reload, then retry /mcp login ${target}.`,
     oauth_client_rejected: `Verify oauthClientId, the app's approval, and support for public-client authentication (token endpoint method none). Clients requiring a client secret are not supported. After configuration changes, run /mcp reload and /mcp login ${target}.`,
     oauth_pkce_unsupported: "Use an authorization server or app configuration that supports authorization-code login with S256 PKCE. This client cannot fall back to login without PKCE.",
+    oauth_scope_required: `Run /mcp login ${target} to review the server's requested scopes. If no review appears, check oauthScopes against the service's requirements. No authorization or replay was attempted; retry only after approval.`,
     oauth_scope_rejected: `Check oauthScopes against the service's allowed scopes and app permissions. Run /mcp reload after changes, then /mcp login ${target}.`,
     oauth_grant_rejected: `Run /mcp login ${target} for a fresh authorization code. If it fails again, verify the registered client and exact callback URL shown by /mcp get ${target}.`,
     oauth_redirect_rejected: `Register the exact callback URL shown by /mcp get ${target}, including its host, port, and /callback path. --no-browser uses the same callback URL and does not bypass redirect validation.`,
@@ -204,6 +207,8 @@ export function diagnose(error: unknown, context: DiagnosticContext): Diagnostic
   for (let depth = 0; depth < 4 && current instanceof Error; depth++) {
     if (current instanceof DiagnosticError)
       return diagnostic(current.diagnostic.code, context);
+    if (current instanceof InsufficientScopeError)
+      return diagnostic("oauth_scope_required", context);
     if (current instanceof UnauthorizedError)
       return diagnostic("authentication_required", context);
     if (current instanceof SdkHttpError) {
