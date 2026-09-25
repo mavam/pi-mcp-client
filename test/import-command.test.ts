@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { ProjectTrustStore, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import extension from "../src/index.js";
 
 const cleanup: (() => Promise<unknown>)[] = [];
@@ -58,7 +58,12 @@ async function host(configuration = document({})) {
   };
   await hooks.get("session_start")({}, ctx);
   cleanup.push(() => hooks.get("session_shutdown")({}, ctx));
-  return { ctx, ui, hooks, source, destination, directory, notifications, dialogs,
+  // Pi trusts bare folders implicitly; project servers also need a saved decision.
+  const trust = () => {
+    ctx.isProjectTrusted = () => true;
+    new ProjectTrustStore(directory).set(directory, true);
+  };
+  return { ctx, ui, hooks, source, destination, directory, notifications, dialogs, trust,
     active: () => active, credentials: () => credentials, messages: () => messages,
     command: (input = `import --scope global ${JSON.stringify(source)}`) => commands.get("mcp").handler(input, ctx),
   };
@@ -95,7 +100,7 @@ test("imports review source settings and save only accepted definitions without 
 
 test("conflicts offer explicit replacement, renaming, and scope precedence without credential merging", async () => {
   const h = await host(document({ existing: { url: "https://old.example", headers: { Authorization: "old-private-token" } } }));
-  h.ctx.isProjectTrusted = () => true;
+  h.trust();
   await writeFile(join(h.directory, ".mcp.json"), document({ existing: { command: "project-command" } }));
   await h.command("reload");
   await writeFile(h.source, document({ existing: { url: "https://new.example" } }));
@@ -185,7 +190,7 @@ for (const interruption of ["session_shutdown", "session_tree", "reload", "trust
     await writeFile(h.source, document({ docs: { command: "node" } }));
     h.ui.confirm = async (_title, _message, options) => {
       if (interruption === "reload") await h.command("reload");
-      else if (interruption === "trust") h.ctx.isProjectTrusted = () => true;
+      else if (interruption === "trust") h.trust();
       else if (interruption === "abort") controller.abort();
       else if (interruption === "busy") h.ctx.isIdle = () => false;
       else await h.hooks.get(interruption)({}, h.ctx);

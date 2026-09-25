@@ -3,9 +3,10 @@
 [Back to the README](../README.md)
 
 You configure which servers the model can access. Add connections to
-`~/.pi/agent/mcp.json`, or `.mcp.json` in a trusted project. For command-based
-setup, see [Add and remove servers](commands.md#add-and-remove-servers). To reuse
-an existing Claude/Cursor JSON or Codex TOML file, see
+`~/.pi/agent/mcp.json`, or `.mcp.json` in a
+[trusted project](behavior.md#project-trust). For command-based setup, see
+[Add and remove servers](commands.md#add-and-remove-servers). To reuse an
+existing Claude/Cursor JSON or Codex TOML file, see
 [Import server definitions](commands.md#import-server-definitions).
 
 ## Files and transports
@@ -16,8 +17,10 @@ MCP configuration standard. Live configuration must use JSON, not VS Code's
 this format. `PI_CODING_AGENT_DIR` overrides the global Pi directory.
 Project definitions replace same-named global definitions in full; fields and
 filters aren't merged. Untrusted project definitions aren't loaded or edited.
-An explicitly named import source is read as data for review; saving into project
-scope still requires project trust.
+Project servers need an explicit trust decision even in folders that Pi trusts
+implicitly; see [project trust](behavior.md#project-trust). An explicitly named
+import source is read as data for review; saving into project scope still
+requires project trust.
 
 ```json
 {

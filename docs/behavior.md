@@ -125,7 +125,8 @@ see [large results](troubleshooting.md#large-results) for size limits.
 
 Only load configuration you trust. Server executables and secret commands run
 with your user permissions; trusted project configuration can replace global
-connections and settings.
+connections and settings. See [project trust](#project-trust) for when a
+project's `.mcp.json` loads.
 
 Configuration imports require an explicit file, scope, selection, and final
 confirmation. Import previews hide connection values; review the source file
@@ -148,3 +149,28 @@ Pi's tool restrictions to prevent discovery and resource operations. Already act
 native tools have their own tool restrictions. Per-resource permission policies
 aren't implemented. Prompt selection uses explicit user commands, not the
 model-facing tool allowlist; disable the server to prevent prompt access.
+
+## Project trust
+
+A project's `.mcp.json` can start local commands, so it loads only after an
+explicit trust decision for the folder. Pi asks for trust only in folders with Pi
+project resources, such as `.pi/settings.json` or `.agents/skills`, and trusts
+other folders implicitly. The extension doesn't rely on that implicit trust:
+
+- **Folders with Pi project resources:** Pi's decision applies, including
+  `--approve` and session-only trust.
+- **Other folders:** a saved decision for the folder or a parent folder applies.
+  Without one, Pi's `defaultProjectTrust` setting applies: `always` loads project
+  servers and `never` ignores them. With the default `ask`, interactive sessions
+  ask when a `.mcp.json` exists, and headless sessions ignore the file.
+- **Untrusted folders:** `--no-approve` or a refusal in Pi always ignores project
+  servers.
+
+Saved answers go to Pi's project trust store, so they also apply to Pi project
+resources. Use Pi's `/trust` command to save or change a decision, then run
+`/mcp reload`; MCP servers don't require a restart. In folders without Pi project
+resources, `--approve` doesn't trust `.mcp.json`; save a decision instead.
+
+Only session start and `/mcp reload` ask. Other configuration commands, such as
+`/mcp add` and `/mcp import`, use the current decision. Untrusted project files
+are neither read nor changed.

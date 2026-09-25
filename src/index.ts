@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import {
   BorderedLoader,
@@ -28,6 +29,7 @@ import { Exposure, restoredTools, TOOLS_TOOL } from "./exposure.js";
 import { convertResult, convertResourceResult, textResult, type ClientDetails } from "./output.js";
 import { renderCall, renderResult } from "./render.js";
 import { STATUS_ENTRY, statusPanel, type StatusSnapshot } from "./status-panel.js";
+import { askProjectTrust, projectTrustDecision } from "./trust.js";
 import {
   diagnose,
   diagnostic,
@@ -75,6 +77,8 @@ export default function mcpClient(
   let loginController: AbortController | undefined;
   let promptController: AbortController | undefined;
   let importController: AbortController | undefined;
+  let trustController: AbortController | undefined;
+  let sessionTrust: { cwd: string; trusted: boolean } | undefined;
   pi.registerEntryRenderer<StatusSnapshot>(STATUS_ENTRY, (entry, _options, theme) =>
     statusPanel(entry.data ?? { servers: [], loaded: [] }, theme),
   );
@@ -147,6 +151,37 @@ export default function mcpClient(
     });
   }
 
+  const trustDecision = (ctx: ExtensionContext) =>
+    projectTrustDecision(agentDir, ctx.cwd, ctx.isProjectTrusted()) ??
+    (sessionTrust?.cwd === ctx.cwd ? sessionTrust.trusted : undefined);
+  const projectTrusted = (ctx: ExtensionContext) => trustDecision(ctx) ?? false;
+
+  /** Ask only when project servers exist and nothing is decided; explain ignored files. */
+  async function resolveProjectTrust(ctx: ExtensionContext): Promise<boolean> {
+    let trusted = trustDecision(ctx);
+    if (!existsSync(join(ctx.cwd, ".mcp.json"))) return trusted ?? false;
+    let answered = false;
+    if (trusted === undefined && ctx.hasUI) {
+      const controller = new AbortController();
+      trustController = controller;
+      try {
+        trusted = await askProjectTrust(agentDir, ctx.cwd, ctx.ui.select.bind(ctx.ui),
+          AbortSignal.any([controller.signal, ...(ctx.signal ? [ctx.signal] : [])]));
+      } finally {
+        if (trustController === controller) trustController = undefined;
+      }
+      if (controller.signal.aborted) return false;
+      if (trusted !== undefined) {
+        sessionTrust = { cwd: ctx.cwd, trusted };
+        answered = true;
+      }
+    }
+    // Pi reports its own refusals, and --no-approve is explicit.
+    if (!trusted && !answered && ctx.hasUI && ctx.isProjectTrusted())
+      ctx.ui.notify("Project .mcp.json ignored: this folder isn't trusted for MCP servers. Run /trust to save a decision, then /mcp reload.", "warning");
+    return trusted ?? false;
+  }
+
   const restore = (ctx: ExtensionContext) => {
     const tools = restoredTools(ctx.sessionManager.getBranch()).filter((tool) => {
       try {
@@ -191,10 +226,12 @@ export default function mcpClient(
       }
     };
     ctx.signal?.throwIfAborted();
+    // Only explicit reloads ask; edits and imports use the current decision.
+    const trusted = mutation ? projectTrusted(ctx) : await resolveProjectTrust(ctx);
     const update = mutation && await updateServerConfig(
-      agentDir, ctx.cwd, ctx.isProjectTrusted(), mutation, validate,
+      agentDir, ctx.cwd, trusted, mutation, validate,
     );
-    const nextConfig = update ? update.config : await loadConfig(agentDir, ctx.cwd, ctx.isProjectTrusted());
+    const nextConfig = update ? update.config : await loadConfig(agentDir, ctx.cwd, trusted);
     validate(nextConfig);
     const next = new McpRuntime(
       nextConfig,
@@ -227,15 +264,18 @@ export default function mcpClient(
   }
 
   pi.on("session_start", async (_event, ctx) => {
-    sessionGeneration++;
+    const generation = ++sessionGeneration;
     promptController?.abort();
     importController?.abort();
+    trustController?.abort();
     await runtime?.close();
     runtime = undefined;
     config = {};
     configError = undefined;
     try {
-      config = await loadConfig(agentDir, ctx.cwd, ctx.isProjectTrusted());
+      const trusted = await resolveProjectTrust(ctx);
+      if (generation !== sessionGeneration) return;
+      config = await loadConfig(agentDir, ctx.cwd, trusted);
       runtime = new McpRuntime(config, ctx.cwd, join(agentDir, "cache", "pi-mcp-client"), createSdkConnector(storeFactory));
       resourceNotifications(runtime, ctx);
     } catch (error) {
@@ -255,6 +295,7 @@ export default function mcpClient(
     loginController?.abort();
     promptController?.abort();
     importController?.abort();
+    trustController?.abort();
     const old = runtime;
     runtime = undefined;
     await old?.close();
@@ -556,7 +597,7 @@ export default function mcpClient(
           const controller = new AbortController();
           importController = controller;
           try {
-            await runImportCommand(args, ctx, agentDir,
+            await runImportCommand(args, ctx, agentDir, () => projectTrusted(ctx),
               AbortSignal.any([controller.signal, ...(ctx.signal ? [ctx.signal] : [])]),
               () => {
                 if (sessionGeneration !== generation || runtime !== activeRuntime)
@@ -619,7 +660,7 @@ export default function mcpClient(
           const remaining = Object.hasOwn(config, server);
           const message = mutation.action === "add"
             ? `✔︎ ${server}: saved in ${mutation.scope} configuration. Connections, authentication, and tool discovery remain on demand.` +
-              (mutation.scope === "global" && ctx.isProjectTrusted()
+              (mutation.scope === "global" && projectTrusted(ctx)
                 ? " Trusted project definitions take precedence over global definitions." : "")
             : `✔︎ ${server}: removed from ${mutation.scope} configuration. Credentials were retained.` +
               (remaining

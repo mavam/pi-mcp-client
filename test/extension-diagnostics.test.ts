@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { ProjectTrustStore, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import extension from "../src/index.js";
 import { restoredTools } from "../src/exposure.js";
 import { prepareTool } from "../src/catalog.js";
@@ -80,6 +80,11 @@ async function host(configuration: string, excluded: string[] = [], credentialSt
     entries,
     entryRenderers,
     command: (args: string) => commands.get("mcp").handler(args, ctx),
+    /** Pi trusts bare folders implicitly; project servers also need a saved decision. */
+    trust: (trusted = true) => {
+      ctx.isProjectTrusted = () => trusted;
+      if (trusted) new ProjectTrustStore(directory).set(directory, true);
+    },
   };
 }
 
@@ -171,7 +176,7 @@ test("add is lazy and remove deactivates affected tools without touching credent
 
 test("scoped commands reconcile override replacement and global fallback without activation", async () => {
   const h = await host(JSON.stringify({ mcpServers: { docs: fixtureServer } }));
-  h.ctx.isProjectTrusted = () => true;
+  h.trust();
   await h.execute("mcp_tools", { activate: ["docs.echo"] });
   await h.command("add --scope project --replace docs https://project.example/mcp");
   expect(h.notifications.at(-1)).toContain("saved in project configuration");
@@ -370,7 +375,7 @@ test("login uses the effective definition without writing global or project file
       throw new Error("fixture: stop before network access");
     });
     await writeFile(join(h.directory, ".mcp.json"), project);
-    h.ctx.isProjectTrusted = () => trusted;
+    h.trust(trusted);
     await h.command("reload");
     await h.command("login example");
     expect(accessed).toEqual([trusted ? "https://project.example/mcp" : "https://global.example/mcp"]);
@@ -977,7 +982,7 @@ test("reload recovers from startup errors and respects project trust", async () 
   expect(
     (await h.execute("mcp_tools", { activate: ["example.echo"] })).details.loaded,
   ).toHaveLength(1);
-  h.ctx.isProjectTrusted = () => true;
+  h.trust();
   await h.command("reload");
   await h.command("get example");
   expect(h.notifications.at(-1)).toContain("disabled");

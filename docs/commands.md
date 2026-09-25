@@ -120,8 +120,9 @@ capabilities you need.
 Both commands require an explicit `--scope global` or `--scope project`:
 
 - **Global:** `~/.pi/agent/mcp.json`.
-- **Project:** `.mcp.json` in the current trusted project. Untrusted project files
-  are neither read nor changed.
+- **Project:** `.mcp.json` in the current
+  [trusted project](behavior.md#project-trust). Untrusted project files are
+  neither read nor changed.
 
 Add an HTTP server by URL, or a stdio server after `--`:
 
@@ -194,7 +195,8 @@ automatically; no conversion file is needed:
 ```
 
 The command requires an interactive TUI or RPC session and an explicit
-`--scope global` or `--scope project`. Project scope requires a trusted project.
+`--scope global` or `--scope project`. Project scope requires a
+[trusted project](behavior.md#project-trust).
 Relative source paths resolve against Pi's current directory; `~/` is supported.
 The path isn't evaluated by a shell, and no application settings are scanned.
 
