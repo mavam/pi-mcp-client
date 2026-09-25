@@ -25,6 +25,7 @@ import {
 } from "./catalog.js";
 import { authenticate, credentialStore, logout, type CredentialStoreFactory } from "./auth.js";
 import { authorizationOptions } from "./authorization.js";
+import { reviewAuthorization } from "./authorization-review.js";
 import { McpRuntime, createSdkConnector, ToolContractError } from "./runtime.js";
 import { Exposure, restoredTools, TOOLS_TOOL } from "./exposure.js";
 import { convertResult, convertResourceResult, textResult, type ClientDetails } from "./output.js";
@@ -274,6 +275,7 @@ export default function mcpClient(
         return false;
       }
     });
+    loginController?.abort();
     promptController?.abort();
     if (mutation?.action !== "import") importController?.abort();
     const old = runtime;
@@ -288,6 +290,7 @@ export default function mcpClient(
 
   pi.on("session_start", async (_event, ctx) => {
     const generation = ++sessionGeneration;
+    loginController?.abort();
     promptController?.abort();
     importController?.abort();
     trustController?.abort();
@@ -839,11 +842,7 @@ export default function mcpClient(
             const challenge = loginRuntime.authorizationChallenge(server);
             if (challenge) {
               options = { ...options, ...authorizationOptions(identity, store, options, challenge.scopes) };
-              const approved = await ctx.ui.confirm(
-                `Additional permissions for ${server}`,
-                `The server requested these scope names (untrusted data):\n${challenge.scopes.join("\n")}\n\nThe new login requests the union of configured, previously granted, and requested scopes:\n${options.oauthScopes!.join("\n")}\n\nContinue to sign-in? The rejected operation will not be replayed.`,
-                { signal },
-              );
+              const approved = await reviewAuthorization(ctx, server, challenge.scopes, options.oauthScopes!, signal);
               signal.throwIfAborted();
               if (!approved) throw failure("cancelled", { server, operation: "auth" });
               if (generation !== sessionGeneration || current() !== loginRuntime ||

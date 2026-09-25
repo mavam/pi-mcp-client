@@ -1,6 +1,6 @@
 import { OAuthProvider, type SecretStore } from "../../src/auth.js";
 
-export function scopeServer(method = "tools/call", scope = "write") {
+export function scopeServer(method = "tools/call", scope = "write", options: { omitScopes?: boolean; dynamic?: boolean; onToken?: () => Promise<void> } = {}) {
   let base = "";
   let record: string | null = null;
   let upgraded = false;
@@ -12,13 +12,19 @@ export function scopeServer(method = "tools/call", scope = "write") {
       return Response.json({ resource: `${base}/mcp`, authorization_servers: [base] });
     if (path === "/.well-known/oauth-authorization-server")
       return Response.json({ issuer: base, authorization_endpoint: `${base}/authorize`, token_endpoint: `${base}/token`,
-        response_types_supported: ["code"], token_endpoint_auth_methods_supported: ["none"], code_challenge_methods_supported: ["S256"] });
+        response_types_supported: ["code"], token_endpoint_auth_methods_supported: ["none"], code_challenge_methods_supported: ["S256"],
+        ...(options.dynamic ? { registration_endpoint: `${base}/register` } : {}) });
+    if (path === "/register") {
+      requests.push("register");
+      return Response.json({ ...await request.json() as object, client_id: "replacement-client" }, { status: 201 });
+    }
     if (path === "/token") {
       requests.push("token");
       const params = new URLSearchParams(await request.text());
       if (params.get("grant_type") !== "authorization_code") throw new Error("Unexpected refresh");
+      await options.onToken?.();
       upgraded = true;
-      return Response.json({ access_token: "upgraded", token_type: "Bearer", scope: "read write" });
+      return Response.json({ access_token: "upgraded", token_type: "Bearer", ...(options.omitScopes ? {} : { scope: "read write" }) });
     }
     if (path !== "/mcp") return new Response(null, { status: 404 });
     if (request.method !== "POST") return new Response(null, { status: 405 });
@@ -40,8 +46,10 @@ export function scopeServer(method = "tools/call", scope = "write") {
     return Response.json({ jsonrpc: "2.0", id: message.id, result: results[message.method] ?? {} });
   } });
   base = `http://127.0.0.1:${server.port}`;
-  const identity = { server: "example", url: `${base}/mcp`, clientId: "client" };
-  new OAuthProvider(identity, store).saveTokens({ access_token: "old", token_type: "Bearer", scope: "read", issuer: base });
-  return { identity, store, requests, config: { url: identity.url, oauthClientId: "client", protocol: "legacy" as const },
+  const identity = { server: "example", url: `${base}/mcp`, clientId: options.dynamic ? undefined : "client" };
+  const provider = new OAuthProvider(identity, store, undefined, { oauthScopes: ["read"] });
+  if (options.dynamic) provider.saveClientInformation({ client_id: "original-client", issuer: base }, { issuer: base });
+  provider.saveTokens({ access_token: "old", token_type: "Bearer", scope: "read", issuer: base });
+  return { identity, store, requests, config: { url: identity.url, oauthClientId: identity.clientId, protocol: "legacy" as const },
     stop: () => server.stop(true) };
 }

@@ -89,24 +89,26 @@ async function host(configuration: string, excluded: string[] = [], credentialSt
   };
 }
 
-for (const outcome of ["approve", "decline", "headless", "reload"] as const) {
+for (const outcome of ["approve", "decline", "headless", "reload", "reload-input", "reload-token"] as const) {
   test(`incremental login requires explicit approval: ${outcome}`, async () => {
-    const fixture = scopeServer();
+    const callbacks: { onToken?: () => Promise<void> } = {};
+    const fixture = scopeServer("tools/call", "write", callbacks);
     cleanup.push(async () => { await fixture.stop(); });
     const h = await host(JSON.stringify({ mcpServers: { example: fixture.config } }), [], async () => fixture.store);
     await h.execute("mcp_tools", { activate: ["example.write"] });
     const failed = await h.execute("mcp__example__write", {});
     expect(JSON.stringify(failed)).toContain("oauth_scope_required");
     expect(JSON.stringify(failed)).not.toContain("private-");
+    const originalGrant = fixture.store.read();
+    if (outcome === "reload-token") callbacks.onToken = async () => { await h.command("reload"); };
     let confirmations = 0;
-    (h.ctx.ui as any).confirm = async (_title: string, message: string) => {
+    h.ctx.ui.select = async (_title, choices) => {
       confirmations++;
-      expect(message).toContain("write");
-      expect(message).toContain("read");
       if (outcome === "reload") await h.command("reload");
-      return outcome !== "decline";
+      return outcome === "decline" ? "Cancel" : choices.includes("Next page") ? "Next page" : "Approve sign-in";
     };
     (h.ctx.ui as any).input = async (message: string) => {
+      if (outcome === "reload-input") await h.command("reload");
       const target = new URL(message.split("Open this URL in a browser:\n")[1].split("\n")[0]);
       expect(target.searchParams.get("scope")?.split(" ").sort()).toEqual(["read", "write"]);
       const callback = new URL(target.searchParams.get("redirect_uri")!);
@@ -117,8 +119,10 @@ for (const outcome of ["approve", "decline", "headless", "reload"] as const) {
     if (outcome === "headless") h.ctx.hasUI = false;
     if (outcome === "headless") await expect(h.command("login example --no-browser")).rejects.toThrow("interactive session");
     else await h.command("login example --no-browser");
-    expect(confirmations).toBe(outcome === "headless" ? 0 : 1);
-    expect(fixture.requests.filter(value => value === "token")).toHaveLength(outcome === "approve" ? 1 : 0);
+    if (outcome === "headless") expect(confirmations).toBe(0);
+    else expect(confirmations).toBeGreaterThan(0);
+    expect(fixture.requests.filter(value => value === "token")).toHaveLength(["approve", "reload-token"].includes(outcome) ? 1 : 0);
+    if (outcome !== "approve") expect(fixture.store.read()).toBe(originalGrant);
     expect(fixture.requests.filter(value => value === "tools/call")).toHaveLength(1);
     if (outcome === "approve") {
       const result = await h.execute("mcp__example__write", {});

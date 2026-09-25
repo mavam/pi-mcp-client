@@ -212,10 +212,14 @@ Run the indicated command yourself:
 /mcp login example
 ```
 
-Review the server's requested scope names and the combined set of configured,
-previously granted, and requested scopes. Approving starts a fresh login. You can
-also use `--no-browser`. Declining leaves your existing grant unchanged. After
-signing in, explicitly retry the operation; sign-in never replays it.
+Page through the server's requested scope names and the combined set of configured,
+previously granted, and requested scopes. In the terminal, press `a` on the last
+page to approve; in RPC, select **Approve sign-in**. Approving starts a fresh login.
+You can also use `--no-browser`. Declining, cancelling sign-in, or a failed token
+exchange leaves your existing grant unchanged. Reloading configuration cancels
+an active login. After signing in, explicitly retry the operation; sign-in never
+replays it. Successful grants retain their requested scopes even when the service
+omits the optional scope field from its token response.
 
 Scope names are untrusted service data, not instructions. Requests are bounded to
 100 scope names and kept only in this Pi session for ten minutes. Reloading
