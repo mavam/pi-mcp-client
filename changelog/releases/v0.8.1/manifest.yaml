@@ -1,0 +1,9 @@
+created: 2026-09-25
+title: Explicit trust for project MCP servers
+intro: >-
+  This release closes a security gap: a project's .mcp.json now loads only after an
+  explicit trust decision, so a freshly cloned repository can no longer start MCP
+  server commands on its own.
+source:
+  mode: sync-stable-queue
+  previous_stable: v0.8.0
