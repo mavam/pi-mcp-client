@@ -51,7 +51,7 @@ test("challenge scope validation is bounded and diagnostics never echo server da
   for (const value of [undefined, "", "read\nwrite", "bad\\scope", "bad\"scope", "é", "x".repeat(257), Array.from({ length: 101 }, (_, i) => `s${i}`).join(" ")])
     expect(parseScopes(value)).toBeUndefined();
   expect(parseScopes("read write read")).toEqual(["read", "write"]);
-  const value = diagnose(new InsufficientScopeError({ requiredScope: "private-scope", errorDescription: "private-error", resourceMetadataUrl: "https://private.example" }), { server: "example", operation: "call" });
+  const value = diagnose(new InsufficientScopeError({ requiredScope: "private-scope", errorDescription: "private-error", resourceMetadataUrl: new URL("https://private.example") }), { server: "example", operation: "call" });
   expect(value.code).toBe("oauth_scope_required");
   expect(JSON.stringify(value)).not.toContain("private");
 });
