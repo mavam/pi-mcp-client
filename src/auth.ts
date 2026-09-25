@@ -12,6 +12,7 @@ import {
 } from "@modelcontextprotocol/client";
 import { fingerprint, object, usesOAuth, type ServerConfig, type ClientOptions } from "./config.js";
 import { oauthCallbackHtml } from "./oauth-page.js";
+import { privateOAuthFetch } from "./oauth-fetch.js";
 import { diagnose, DiagnosticError, failure } from "./diagnostics.js";
 
 export type OAuthOptions = Pick<ClientOptions, "oauthScopes" | "oauthCallbackPort">;
@@ -416,7 +417,7 @@ export async function authenticate(
     resolveCallback(params);
   });
   const fetchFn = (input: string | URL | Request, init?: RequestInit) =>
-    fetch(input, {
+    privateOAuthFetch(input, {
       ...init,
       signal: AbortSignal.any([deadline, ...(init?.signal ? [init.signal] : [])]),
     });
