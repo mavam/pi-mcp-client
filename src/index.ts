@@ -30,6 +30,8 @@ import { convertResult, convertResourceResult, textResult, type ClientDetails } 
 import { renderCall, renderResult } from "./render.js";
 import { STATUS_ENTRY, statusPanel, type StatusSnapshot } from "./status-panel.js";
 import { askProjectTrust, projectTrustDecision } from "./trust.js";
+import { chooseOption } from "./prompt-selector.js";
+import type { ElicitationUI } from "./elicitation.js";
 import {
   diagnose,
   diagnostic,
@@ -46,9 +48,10 @@ function errorResult(error: unknown, context: DiagnosticContext) {
     error instanceof ToolContractError
       ? diagnostic("tool_changed", context)
       : diagnose(error, context);
+  // Elicitation outcomes mean the server refused to run the tool; nothing needs verification.
   const message =
     formatDiagnostic(value) +
-    (context.operation === "call"
+    (context.operation === "call" && !value.code.startsWith("elicitation_")
       ? " The call was not replayed. The server may already have performed the operation; verify before retrying."
       : "");
   return textResult(message, {
@@ -90,6 +93,23 @@ export default function mcpClient(
       (expanded && typeof message.content === "string" ? `\n${message.content}` : ""), outputPad, 0);
   });
   const exposure = new Exposure(pi, registerNative);
+  /** Open a URL in the default browser without exposing it in notifications or history. */
+  const launchBrowser = async (target: string) => {
+    const command =
+      process.platform === "darwin"
+        ? "open"
+        : process.platform === "win32"
+          ? "explorer.exe"
+          : "xdg-open";
+    const result = await pi.exec(command, [target], { timeout: 5000 }).catch(() => undefined);
+    return !!result && result.code === 0;
+  };
+  const elicitationUi = (ctx: ExtensionContext): ElicitationUI => ({
+    select: (title, choices, signal) => chooseOption(ctx, title, choices, signal),
+    editor: (title, value) => ctx.ui.editor(title, value),
+    notify: (message, type) => ctx.ui.notify(message, type),
+    open: launchBrowser,
+  });
   const current = () => {
     if (!runtime)
       throw (
@@ -137,6 +157,7 @@ export default function mcpClient(
             args as Record<string, unknown>,
             signal ?? ctx.signal,
             emit,
+            ctx.hasUI ? elicitationUi(ctx) : undefined,
           );
           return await convertResult(result, label);
         } catch (error) {
@@ -238,6 +259,7 @@ export default function mcpClient(
       ctx.cwd,
       join(agentDir, "cache", "pi-mcp-client"),
       createSdkConnector(storeFactory),
+      { interactive: ctx.hasUI },
     );
     const active = new Set(pi.getActiveTools());
     const retained = [...exposure.definitions.values()].filter((tool) => {
@@ -276,7 +298,7 @@ export default function mcpClient(
       const trusted = await resolveProjectTrust(ctx);
       if (generation !== sessionGeneration) return;
       config = await loadConfig(agentDir, ctx.cwd, trusted);
-      runtime = new McpRuntime(config, ctx.cwd, join(agentDir, "cache", "pi-mcp-client"), createSdkConnector(storeFactory));
+      runtime = new McpRuntime(config, ctx.cwd, join(agentDir, "cache", "pi-mcp-client"), createSdkConnector(storeFactory), { interactive: ctx.hasUI });
       resourceNotifications(runtime, ctx);
     } catch (error) {
       configError = new DiagnosticError(diagnose(error, { operation: "configuration" }));
@@ -801,14 +823,7 @@ export default function mcpClient(
           const loginRuntime = current();
           const open = async (target: string) => {
             // Authorization URLs stay out of notifications and session history.
-            const command =
-              process.platform === "darwin"
-                ? "open"
-                : process.platform === "win32"
-                  ? "explorer.exe"
-                  : "xdg-open";
-            const result = await pi.exec(command, [target], { timeout: 5000 }).catch(() => undefined);
-            if (!result || result.code !== 0)
+            if (!(await launchBrowser(target)))
               throw failure("oauth_failed", { server, operation: "auth" });
           };
           if (loginController) throw failure("busy", { server, operation: "auth" });

@@ -27,7 +27,7 @@ async function fixture(protocol: "auto" | "legacy" = "auto") {
   const servers: McpServer[] = [];
   const clients: Client[] = [];
   const notifications: (() => void)[] = [];
-  const connect: ConnectFactory = async (_name, _config, _signal, _tools, _resources, onPromptsChanged) => {
+  const connect: ConnectFactory = async (_name, _config, _signal, handlers) => {
     const server = new McpServer({ name: "prompts", version: "1" });
     server.registerTool("noop", { inputSchema: z.object({}) }, async () => ({ content: [] }));
     server.registerPrompt("explain", {
@@ -39,7 +39,7 @@ async function fixture(protocol: "auto" | "legacy" = "auto") {
     });
     const [transport, other] = InMemoryTransport.createLinkedPair();
     await server.connect(other);
-    const notify = () => { changed++; onPromptsChanged?.(); };
+    const notify = () => { changed++; handlers?.promptsChanged?.(); };
     notifications.push(notify);
     const client = new Client({ name: "test", version: "1" }, {
       versionNegotiation: { mode: protocol },

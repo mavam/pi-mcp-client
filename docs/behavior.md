@@ -51,6 +51,41 @@ configuration reload invalidate pending selections. The agent must be idle when
 you choose **Use prompt**; another active turn is never silently interrupted.
 Accepted content becomes session data and may contain sensitive information.
 
+## Server requests for input
+
+During a tool call, a server can ask you for information or send you to a web
+page. Pi shows each request in a dialog that names the requesting server. The
+model never sees or answers these dialogs, and the tool call waits until you
+respond. Time spent answering doesn't count against the
+[tool timeout](configuration.md#pi-specific-options).
+
+Form requests list the requested fields with their current values, including
+server defaults. Select a field to change it; Pi validates each value against
+the field's type and constraints. Only **Submit** sends values to the server.
+**Decline** refuses the request, and **Cancel** or Esc dismisses it; the server
+receives no values either way. Don't enter passwords, API keys, or payment
+details in a form. Servers must use a web page for sensitive information.
+
+Web page requests show the site and the full URL before anything opens.
+**Open in browser** launches your default browser. **I'll open it myself**
+confirms without launching one, which is useful over SSH; copy the URL first.
+Pi opens only HTTPS pages, or HTTP pages on this computer, and refuses URLs with
+embedded credentials. Site names with internationalized characters appear in
+their encoded `xn--` form with a warning. Information you enter on the page goes
+to that site, not to Pi.
+
+Some servers refuse to run a tool until you complete a step on a web page. After
+you open the page, Pi waits until the server confirms completion or you choose
+**Done**. The tool doesn't run again automatically: the model receives the
+outcome and can call the tool again after you complete the step.
+
+Pi accepts server requests only in interactive sessions and only while a tool
+call to that server is running. Requests at other times, including during
+resource reads and prompt previews, are refused without a dialog. Headless
+sessions don't offer this capability to servers, so servers that support it
+fall back to their non-interactive behavior. Dialogs appear one at a time.
+Stopping the tool call or ending the session closes any open request.
+
 ## Discovery and caching
 
 Connections start on demand, never while the extension factory loads. A search

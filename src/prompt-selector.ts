@@ -1,5 +1,26 @@
-import type { KeybindingsManager, Theme } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext, KeybindingsManager, Theme } from "@earendil-works/pi-coding-agent";
 import { SelectList, Text, type Component } from "@earendil-works/pi-tui";
+
+/** Native selectors in RPC; a TUI selector with a plain-text body. Aborting closes it. */
+export async function chooseOption(
+  ctx: ExtensionContext, title: string, choices: string[], signal: AbortSignal,
+): Promise<string | undefined> {
+  if (signal.aborted) return;
+  if (ctx.mode !== "tui") return ctx.ui.select(title, choices, { signal });
+  return ctx.ui.custom<string | undefined>((tui, theme, keys, done) => {
+    let settled = false;
+    const finish = (choice: string | undefined) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", abort);
+      done(choice);
+    };
+    const abort = () => finish(undefined);
+    signal.addEventListener("abort", abort, { once: true });
+    const selector = promptSelector(title, choices, theme, keys, finish, () => tui.requestRender());
+    return { ...selector, dispose: () => signal.removeEventListener("abort", abort) };
+  });
+}
 
 /** Keep explanatory text outside the accent/bold heading used by native selectors. */
 export function promptSelector(

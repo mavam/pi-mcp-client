@@ -71,6 +71,13 @@ is needed, first use follows three steps: discover, activate, then call the nati
 tool. There is no invocation proxy. Previously loaded tools remain available;
 [session behavior](behavior.md#sessions) describes restoration and tool restrictions.
 
+A call can pause while the user answers a
+[server request for input](behavior.md#server-requests-for-input); the model
+never sees the dialog or its values unless the server includes them in its
+result. When a server requires a browser step first, the call fails with an
+`elicitation_*` diagnostic and isn't replayed. After `elicitation_completed`,
+the model can call the tool again.
+
 ## Read resources as context
 
 For a request such as “Use the authentication guide to explain this API,” the
