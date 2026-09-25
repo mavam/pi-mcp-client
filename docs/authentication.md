@@ -229,10 +229,12 @@ rest, not against a compromised Pi process or OS account.
 
 The SDK signs fresh request proofs and handles bounded nonce challenges. Enabling
 DPoP requests proof support; it doesn't require the service to issue bound tokens.
-If the service issues Bearer tokens, requests still use Bearer authentication.
+If the service issues Bearer access tokens, resource requests still use Bearer
+authentication. Refresh tokens can be DPoP-bound independently; their binding is
+retained even if the access token is Bearer or the signing key is lost.
 `/mcp get example` shows whether DPoP is configured, not whether a grant is bound.
 
-If a bound token's key is missing, sign in again. If the key is corrupt, use
+If a bound access or refresh token's key is missing, sign in again at the same issuer. If the key is corrupt, use
 `/mcp logout example` before signing in. Disabling DPoP doesn't convert bound
 tokens to Bearer tokens: enable it again or log out and obtain a new grant.
 Logout removes the key and tokens locally and attempts remote token revocation.

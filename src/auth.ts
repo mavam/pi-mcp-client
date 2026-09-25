@@ -48,6 +48,9 @@ interface Credentials extends OAuthIdentity {
   registrations?: Record<string, { redirect: string; scope?: string }>;
   tokens?: StoredOAuthTokens;
   dpopKey?: StoredDpopKey;
+  /** Grant trust and refresh binding survive key loss and SDK token invalidation. */
+  grantIssuer?: string;
+  dpopRefreshBound?: boolean;
 }
 export interface SecretStore {
   read(): string | null;
@@ -156,7 +159,9 @@ export class OAuthProvider implements OAuthClientProvider {
   clientInformation(ctx?: OAuthClientInformationContext) {
     this.assertCurrent();
     if (!ctx) return undefined;
-    if (this.data.dpopKey && this.data.dpopKey.issuer !== ctx.issuer)
+    const grantIssuer = this.data.grantIssuer ?? this.data.tokens?.issuer;
+    if ((grantIssuer && grantIssuer !== ctx.issuer) ||
+        (this.data.dpopKey && this.data.dpopKey.issuer !== ctx.issuer))
       throw failure("oauth_issuer_changed", { operation: "auth", oauth: true });
     const stored = Object.hasOwn(this.data.clients, ctx.issuer) ? this.data.clients[ctx.issuer] : undefined;
     if (!this.clientId) {
@@ -212,12 +217,17 @@ export class OAuthProvider implements OAuthClientProvider {
     }
     const scope = tokens.scope ?? this.requestedScope ??
       (tokens.issuer === this.data.tokens?.issuer ? this.data.tokens?.scope : undefined);
+    this.data.dpopRefreshBound = !!tokens.refresh_token && (!!this.dpopSession ||
+      (!!this.data.dpopRefreshBound && tokens.refresh_token === this.data.tokens?.refresh_token));
+    this.data.grantIssuer = tokens.issuer ?? this.data.grantIssuer;
     this.data.tokens = { ...tokens, ...(scope !== undefined ? { scope } : {}) };
     this.save();
   }
   async dpop(): Promise<DpopSession | undefined> {
     this.assertCurrent();
-    const bound = this.data.tokens?.token_type?.toLowerCase() === "dpop";
+    // An AS can issue Bearer access tokens with DPoP-bound refresh tokens.
+    const bound = this.data.tokens?.token_type?.toLowerCase() === "dpop" ||
+      (!!this.data.tokens?.refresh_token && !!this.data.dpopRefreshBound);
     if (!this.options.oauthDpop) {
       if (bound) throw failure("oauth_dpop_unavailable", { operation: "auth" });
       return undefined;

@@ -16,7 +16,7 @@ function memoryStore(): SecretStore {
   return { read: () => value, write: record => { value = record; }, remove: () => { value = null; } };
 }
 
-async function login(identity: { server: string; url: string; clientId: string }, store: SecretStore, enabled = true) {
+async function login(identity: { server: string; url: string; clientId?: string }, store: SecretStore, enabled = true) {
   await authenticate(identity, async () => { throw new Error("No browser"); }, undefined, store, {
     oauthDpop: enabled, handoff: async target => {
       const url = new URL(target);
@@ -28,12 +28,12 @@ async function login(identity: { server: string; url: string; clientId: string }
   });
 }
 
-async function service(bearer = false) {
-  let issuer = "", resource = "";
+async function service(bearer = false, dynamic = false) {
+  let issuer = "", resource = "", advertisedIssuer = "";
   const proofs: string[] = [];
   const grants = new Map<string, string>();
   const rejected = new Set<string>();
-  const attempts: { token: number; resource: number; executed: number; refresh: number } = { token: 0, resource: 0, executed: 0, refresh: 0 };
+  const attempts = { token: 0, resource: 0, executed: 0, refresh: 0, register: 0 };
   const verify = async (request: Request, token?: string) => {
     const proof = request.headers.get("dpop")!;
     expect(proof).toBeTruthy();
@@ -56,7 +56,12 @@ async function service(bearer = false) {
     if (path === "/.well-known/oauth-authorization-server") return Response.json({ issuer,
       authorization_endpoint: `${issuer}/authorize`, token_endpoint: `${issuer}/token`,
       response_types_supported: ["code"], code_challenge_methods_supported: ["S256"],
-      token_endpoint_auth_methods_supported: ["none"], dpop_signing_alg_values_supported: ["ES256"] });
+      token_endpoint_auth_methods_supported: ["none"], dpop_signing_alg_values_supported: ["ES256"],
+      ...(dynamic ? { registration_endpoint: `${issuer}/register` } : {}) });
+    if (path === "/register") {
+      attempts.register++;
+      return Response.json({ ...await request.json() as object, client_id: "dynamic-client" }, { status: 201 });
+    }
     if (path !== "/token") return new Response(null, { status: 404 });
     attempts.token++;
     const proof = await verify(request);
@@ -75,7 +80,7 @@ async function service(bearer = false) {
   issuer = `http://127.0.0.1:${as.port}`;
   const rs = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
     if (new URL(request.url).pathname.startsWith("/.well-known/oauth-protected-resource"))
-      return Response.json({ resource: `${resource}/mcp`, authorization_servers: [issuer] });
+      return Response.json({ resource: `${resource}/mcp`, authorization_servers: [advertisedIssuer || issuer] });
     attempts.resource++;
     const authorization = request.headers.get("authorization")!;
     expect(authorization?.startsWith(bearer ? "Bearer " : "DPoP ")).toBe(true);
@@ -100,7 +105,8 @@ async function service(bearer = false) {
     return Response.json({ jsonrpc: "2.0", id: message.id, result });
   } });
   resource = `http://127.0.0.1:${rs.port}`;
-  return { identity: { server: "example", url: `${resource}/mcp`, clientId: "client" }, attempts, rejected,
+  return { identity: { server: "example", url: `${resource}/mcp`, clientId: dynamic ? undefined : "client" }, attempts, rejected,
+    issuer, changeIssuer: (value: string) => { advertisedIssuer = value; },
     stop: async () => { await rs.stop(true); await as.stop(true); } };
 }
 
@@ -133,8 +139,8 @@ for (const bearer of [false, true]) test(`SDK DPoP round trip, persistence, nonc
   } finally { await runtime?.close(); await f.stop(); await rm(directory, { recursive: true, force: true }); }
 }, 15_000);
 
-for (const defect of ["missing", "corrupt", "disabled", "client-mismatch", "issuer-mismatch"] as const) test(`DPoP fails closed with ${defect} key state`, async () => {
-  const f = await service(); const store = memoryStore();
+for (const bearer of [false, true]) for (const defect of ["missing", "corrupt", "disabled", "client-mismatch", "issuer-mismatch"] as const) test(`DPoP fails closed with ${defect} key state (Bearer=${bearer})`, async () => {
+  const f = await service(bearer); const store = memoryStore();
   const directory = await mkdtemp(join(tmpdir(), "mcp-dpop-key-"));
   let runtime: McpRuntime | undefined;
   try {
@@ -145,13 +151,42 @@ for (const defect of ["missing", "corrupt", "disabled", "client-mismatch", "issu
     if (defect === "client-mismatch") data.dpopKey.clientId = "other";
     if (defect === "issuer-mismatch") data.dpopKey.issuer = "https://other.example";
     store.write(JSON.stringify(data));
+    const original = store.read();
+    expect(data.dpopRefreshBound).toBe(true);
     runtime = new McpRuntime({ example: { url: f.identity.url, oauthClientId: "client", oauthDpop: defect !== "disabled", protocol: "legacy" } }, directory, directory, createSdkConnector(async () => store));
     const result = await runtime.discover();
     expect(result.diagnostics[0]?.code).toBe(defect === "issuer-mismatch" ? "oauth_issuer_changed" : "oauth_dpop_unavailable");
     expect(f.attempts.resource).toBe(0);
+    expect(f.attempts.refresh).toBe(0);
+    expect(store.read()).toBe(original);
     expect(JSON.stringify(result)).not.toContain(data.tokens.access_token);
     if (defect === "missing") { await login(f.identity, store); expect(JSON.parse(store.read()!).dpopKey).toBeDefined(); }
   } finally { await runtime?.close(); await f.stop(); await rm(directory, { recursive: true, force: true }); }
+}, 15_000);
+
+test("dynamic DPoP grants retain their issuer pin after key loss", async () => {
+  const a = await service(false, true), b = await service(false, true);
+  const store = memoryStore();
+  try {
+    await login(a.identity, store);
+    const data = JSON.parse(store.read()!);
+    expect(data.grantIssuer).toBe(a.issuer);
+    delete data.dpopKey;
+    store.write(JSON.stringify(data));
+    const original = store.read();
+    a.changeIssuer(b.issuer);
+    await expect(login(a.identity, store)).rejects.toThrow("oauth_issuer_changed");
+    expect(b.attempts.register).toBe(0);
+    expect(store.read()).toBe(original);
+    a.changeIssuer(a.issuer);
+    await login(a.identity, store);
+    expect(JSON.parse(store.read()!).dpopKey.issuer).toBe(a.issuer);
+    a.changeIssuer(b.issuer);
+    await logout(a.identity, store);
+    await login(a.identity, store);
+    expect(b.attempts.register).toBe(1);
+    expect(JSON.parse(store.read()!).grantIssuer).toBe(b.issuer);
+  } finally { await a.stop(); await b.stop(); }
 }, 15_000);
 
 test("DPoP configuration is explicit, OAuth-only, and safe to inspect", async () => {
