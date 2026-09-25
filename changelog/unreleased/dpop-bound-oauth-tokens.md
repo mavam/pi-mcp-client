@@ -3,7 +3,9 @@ title: DPoP-bound OAuth tokens
 type: feature
 authors:
   - mavam
-created: 2026-09-25T11:43:21.146364Z
+prs:
+  - 33
+created: 2026-09-25T11:44:35.795222Z
 ---
 
 OAuth HTTP servers can now use DPoP proofs, which let a service bind access tokens to your client's signing key. Set `"oauthDpop": true` in the server definition, run `/mcp reload`, then `/mcp login example`. For a new server, use `/mcp add --scope global --oauth-dpop example https://mcp.example.com/mcp`.
