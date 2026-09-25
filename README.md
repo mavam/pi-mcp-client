@@ -23,7 +23,9 @@ This server doesn't require credentials. Ask Pi:
 
 You configure servers and sign in when needed. The model finds and uses
 relevant tools and resources—you don't need to select tools before asking a
-question.
+question. When a server needs more information during a tool call, Pi asks you
+directly and sends only what you submit. See
+[server requests for input](docs/behavior.md#server-requests-for-input).
 
 Use these commands in Pi to manage your connections:
 

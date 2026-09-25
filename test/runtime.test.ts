@@ -38,7 +38,7 @@ async function fixture() {
     _name,
     config,
     _signal,
-    onToolsChanged,
+    handlers,
   ) => {
     connects++;
     const server = new McpServer({ name: "fixture", version: "1" });
@@ -59,7 +59,7 @@ async function fixture() {
     const [clientTransport, serverTransport] =
       InMemoryTransport.createLinkedPair();
     await server.connect(serverTransport);
-    const notify = () => onToolsChanged?.();
+    const notify = () => handlers?.toolsChanged?.();
     notifications.push(notify);
     const client = new Client(
       { name: "test", version: "1" },

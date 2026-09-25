@@ -37,6 +37,9 @@ const messages = {
   subscriptions_unsupported: "The server did not accept resource subscriptions.",
   subscription_limit: "The connection has reached its limit of 50 resource subscriptions.",
   catalog_changed: "The catalog kept changing during discovery.",
+  elicitation_required: "The server requires a browser step before this tool can run.",
+  elicitation_declined: "The browser step required by the server was declined or dismissed.",
+  elicitation_completed: "The browser step required by the server is complete.",
   oauth_failed: "OAuth authentication did not complete.",
   oauth_client_required: "OAuth requires a registered client: this server does not support dynamic client registration.",
   oauth_registration_rejected: "The authorization server rejected OAuth client registration.",
@@ -126,6 +129,9 @@ export function diagnostic(
     subscriptions_unsupported: "Choose a server with resource subscription support, or read the resource explicitly when needed.",
     subscription_limit: "Unsubscribe from another resource before adding a new watch.",
     catalog_changed: "Retry discovery once the server catalog has settled.",
+    elicitation_required: "The tool didn't run. Use an interactive Pi session, where the user can review and open the server's page, then retry.",
+    elicitation_declined: "The tool didn't run. Retry only if the user asks.",
+    elicitation_completed: "The tool didn't run yet. Call it again to continue.",
     oauth_failed: `Check the service's OAuth requirements and /mcp get ${target} for the client type, requested scopes, and callback address. Only public clients with PKCE are supported; clients requiring a client secret are not. Retry /mcp login ${target} after correcting the setup.`,
     oauth_client_required: `Configure oauthClientId with a registered public/PKCE client ID in this server's definition. Register the exact callback URL shown by /mcp get ${target}, then run /mcp reload and /mcp login ${target}. Clients requiring a client secret are not supported. --no-browser does not fix client registration.`,
     oauth_registration_rejected: `Check whether the service allows public/native client registration and the callback URL shown by /mcp get ${target}. If registration is restricted, configure an approved public client with oauthClientId, run /mcp reload, then retry /mcp login ${target}.`,
@@ -251,6 +257,8 @@ export function diagnose(error: unknown, context: DiagnosticContext): Diagnostic
       const code = sdkOAuthFallback(current);
       if (code) return diagnostic(code, context);
     }
+    if (current instanceof ProtocolError && current.code === ProtocolErrorCode.UrlElicitationRequired)
+      return diagnostic("elicitation_required", context);
     if (current instanceof ProtocolError) return diagnostic(
       context.operation === "read" && (current instanceof ResourceNotFoundError || current.code === ProtocolErrorCode.ResourceNotFound) ? "resource_not_found" : "protocol_error", context,
     );

@@ -28,7 +28,7 @@ async function fixture(protocol: "auto" | "legacy" = "auto", onlyResources = fal
   const clients: Client[] = [];
   const servers: McpServer[] = [];
   const notifications: (() => void)[] = [];
-  const connect: ConnectFactory = async (_name, config, _signal, onToolsChanged, onResourcesChanged) => {
+  const connect: ConnectFactory = async (_name, config, _signal, handlers) => {
     const server = new McpServer({ name: "resources", version: "1" });
     servers.push(server);
     if (!onlyResources) server.registerTool("query", { description: "Query the database schema", inputSchema: z.object({}) }, async () => {
@@ -42,12 +42,12 @@ async function fixture(protocol: "auto" | "legacy" = "auto", onlyResources = fal
     });
     const [transport, other] = InMemoryTransport.createLinkedPair();
     await server.connect(other);
-    const notify = () => onResourcesChanged?.();
+    const notify = () => handlers?.resourcesChanged?.();
     notifications.push(notify);
     const client = new Client({ name: "test", version: "1" }, {
       versionNegotiation: { mode: config.protocol ?? "auto" },
       listChanged: {
-        tools: { autoRefresh: false, debounceMs: 0, onChanged: () => onToolsChanged?.() },
+        tools: { autoRefresh: false, debounceMs: 0, onChanged: () => handlers?.toolsChanged?.() },
         resources: { autoRefresh: false, debounceMs: 0, onChanged: notify },
       },
     });

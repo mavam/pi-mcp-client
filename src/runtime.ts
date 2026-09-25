@@ -3,12 +3,20 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import {
   Client,
+  ProtocolError,
+  ProtocolErrorCode,
+  SdkError,
+  SdkErrorCode,
   StreamableHTTPClientTransport,
   type CallToolResult,
+  type ElicitRequestParams,
+  type ElicitRequestURLParams,
+  type ElicitResult,
   type ReadResourceResult,
   UriTemplate,
   type Transport,
 } from "@modelcontextprotocol/client";
+import packageJson from "../package.json" with { type: "json" };
 import {
   StdioClientTransport,
   getDefaultEnvironment,
@@ -28,6 +36,7 @@ import { connectionAuthProvider, credentialStore, type CredentialStoreFactory } 
 import { preparePrompt, validPromptArguments, type CatalogPrompt } from "./prompts.js";
 import { ResourceSubscriptions } from "./subscriptions.js";
 import { resolveSecrets } from "./secrets.js";
+import { awaitCompletion, elicit, requiredElicitations, type ElicitationUI } from "./elicitation.js";
 import {
   diagnose,
   diagnostic,
@@ -45,7 +54,17 @@ interface ResourceMetadataCache {
   resourceWarnings?: string[];
   generation?: number;
 }
+/** A tool call that can present server requests to the user. */
+interface CallScope {
+  ui: ElicitationUI;
+  deadline: Deadline;
+  progress?: (message: string) => void;
+}
 interface ServerState extends ResourceMetadataCache {
+  scopes?: Set<CallScope>;
+  scopesEnded?: AbortController;
+  pendingElicitations?: number;
+  awaitingCompletion?: Map<string, Set<() => void>>;
   client?: Client;
   transport?: Transport;
   connecting?: Promise<Client>;
@@ -85,14 +104,85 @@ export interface Discovery {
   diagnostics: Diagnostic[];
   warnings: string[];
 }
+export interface ConnectionHandlers {
+  toolsChanged?: () => void;
+  resourcesChanged?: () => void;
+  promptsChanged?: () => void;
+  /** Supplied only in interactive sessions; its presence declares elicitation support. */
+  elicit?: (params: ElicitRequestParams, signal: AbortSignal) => Promise<ElicitResult>;
+  elicitationComplete?: (elicitationId: string) => void;
+}
 export type ConnectFactory = (
   name: string,
   config: ServerConfig,
   signal: AbortSignal,
-  onToolsChanged?: () => void,
-  onResourcesChanged?: () => void,
-  onPromptsChanged?: () => void,
+  handlers?: ConnectionHandlers,
 ) => Promise<{ client: Client; transport: Transport }>;
+
+/** Largest timer delay; the pausable call deadline bounds tool calls instead. */
+const UNBOUNDED_TIMEOUT = 2_147_483_647;
+const MAX_PENDING_ELICITATIONS = 4;
+
+/** A call deadline that stops while the user answers a server request. */
+class Deadline {
+  private readonly controller = new AbortController();
+  readonly signal = this.controller.signal;
+  private timer?: ReturnType<typeof setTimeout>;
+  private started = 0;
+  private holds = 0;
+  private done = false;
+  constructor(private remaining: number) {
+    this.start();
+  }
+  private start() {
+    this.started = Date.now();
+    this.timer = setTimeout(
+      () => this.controller.abort(new SdkError(SdkErrorCode.RequestTimeout, "Request timed out")),
+      Math.max(0, this.remaining),
+    );
+  }
+  pause() {
+    if (this.holds++ || !this.timer) return;
+    clearTimeout(this.timer);
+    this.timer = undefined;
+    this.remaining -= Date.now() - this.started;
+  }
+  resume() {
+    if (--this.holds || this.done || this.signal.aborted) return;
+    this.start();
+  }
+  dispose() {
+    this.done = true;
+    clearTimeout(this.timer);
+  }
+}
+
+/** One SDK client per connection. Protocol behavior stays in the SDK. */
+export function createClient(config: ServerConfig, handlers: ConnectionHandlers = {}): Client {
+  const { elicit, elicitationComplete } = handlers;
+  const client = new Client(
+    { name: "pi-mcp-client", version: packageJson.version },
+    {
+      ...(elicit ? { capabilities: { elicitation: { form: {}, url: {} } } } : {}),
+      listChanged: {
+        tools: { autoRefresh: false, debounceMs: 0, onChanged: () => handlers.toolsChanged?.() },
+        prompts: { autoRefresh: false, debounceMs: 0, onChanged: () => handlers.promptsChanged?.() },
+        resources: { autoRefresh: false, debounceMs: 0, onChanged: () => handlers.resourcesChanged?.() },
+      },
+      versionNegotiation: {
+        mode: config.protocol ?? "auto",
+        probe: { timeoutMs: config.startupTimeoutMs ?? config.timeoutMs ?? 15_000 },
+      },
+    },
+  );
+  if (elicit) {
+    // Legacy requests and 2026-07-28 input_required rounds share this handler.
+    client.setRequestHandler("elicitation/create", (request, ctx) => elicit(request.params, ctx.mcpReq.signal));
+    client.setNotificationHandler("notifications/elicitation/complete", (notification) =>
+      elicitationComplete?.(notification.params.elicitationId));
+  }
+  return client;
+}
 
 export function waitFor<T>(
   promise: Promise<T>,
@@ -121,39 +211,12 @@ export const createSdkConnector = (storeFactory: CredentialStoreFactory = creden
   name,
   config,
   signal,
-  onToolsChanged,
-  onResourcesChanged,
-  onPromptsChanged,
+  handlers,
 ) => {
   const timeout = config.timeoutMs ?? 15_000;
   const startupTimeout = config.startupTimeoutMs ?? timeout;
   let connecting = true;
-  const client = new Client(
-    { name: "pi-mcp-client", version: "0.1.0" },
-    {
-      listChanged: {
-        tools: {
-          autoRefresh: false,
-          debounceMs: 0,
-          onChanged: () => onToolsChanged?.(),
-        },
-        prompts: {
-          autoRefresh: false,
-          debounceMs: 0,
-          onChanged: () => onPromptsChanged?.(),
-        },
-        resources: {
-          autoRefresh: false,
-          debounceMs: 0,
-          onChanged: () => onResourcesChanged?.(),
-        },
-      },
-      versionNegotiation: {
-        mode: config.protocol ?? "auto",
-        probe: { timeoutMs: startupTimeout },
-      },
-    },
-  );
+  const client = createClient(config, handlers);
   const transport = config.command
     ? new StdioClientTransport({
         command: config.command,
@@ -220,6 +283,8 @@ export class McpRuntime {
     readonly cwd: string,
     private readonly cacheDir: string,
     private readonly connect: ConnectFactory = connectSdk,
+    /** Interactive sessions declare elicitation support to servers. */
+    private readonly options: { interactive?: boolean } = {},
   ) {}
 
   onResourceUpdated?: (server: string, uri: string) => void;
@@ -291,36 +356,45 @@ export class McpRuntime {
           this.lifetime.signal,
         ),
         this.lifetime.signal,
-        () => {
-          if (
-            this.closing ||
-            this.lifetime.signal.aborted ||
-            state.connectionToken !== token
-          )
-            return;
-          state.catalogGeneration++;
-          state.catalogDirty = true;
-          state.tools = undefined;
-          state.warnings = undefined;
-          const path = join(this.cacheDir, `${identity}.json`);
-          state.invalidating = withFileMutationQueue(path, () =>
-            rm(path, { force: true }),
-          ).catch(() => {
-            state.warnings = [
-              `${name}: stale catalog cache could not be removed.`,
-            ];
-          });
-        },
-        () => {
-          if (this.closing || this.lifetime.signal.aborted || state.connectionToken !== token) return;
-          state.resourceGeneration++;
-          state.resources = undefined;
-          state.resourceWarnings = undefined;
-        },
-        () => {
-          if (this.closing || this.lifetime.signal.aborted || state.connectionToken !== token) return;
-          state.promptGeneration++;
-          state.prompts = undefined;
+        {
+          toolsChanged: () => {
+            if (
+              this.closing ||
+              this.lifetime.signal.aborted ||
+              state.connectionToken !== token
+            )
+              return;
+            state.catalogGeneration++;
+            state.catalogDirty = true;
+            state.tools = undefined;
+            state.warnings = undefined;
+            const path = join(this.cacheDir, `${identity}.json`);
+            state.invalidating = withFileMutationQueue(path, () =>
+              rm(path, { force: true }),
+            ).catch(() => {
+              state.warnings = [
+                `${name}: stale catalog cache could not be removed.`,
+              ];
+            });
+          },
+          resourcesChanged: () => {
+            if (this.closing || this.lifetime.signal.aborted || state.connectionToken !== token) return;
+            state.resourceGeneration++;
+            state.resources = undefined;
+            state.resourceWarnings = undefined;
+          },
+          promptsChanged: () => {
+            if (this.closing || this.lifetime.signal.aborted || state.connectionToken !== token) return;
+            state.promptGeneration++;
+            state.prompts = undefined;
+          },
+          ...(this.options.interactive ? {
+            elicit: (params: ElicitRequestParams, signal: AbortSignal) => this.elicit(name, state, token, params, signal),
+            elicitationComplete: (id: string) => {
+              if (state.connectionToken === token)
+                for (const complete of state.awaitingCompletion?.get(id) ?? []) complete();
+            },
+          } : {}),
         },
       );
       if (this.closing || this.lifetime.signal.aborted) {
@@ -734,6 +808,8 @@ export class McpRuntime {
     args: Record<string, unknown>,
     signal?: AbortSignal,
     progress?: (message: string) => void,
+    /** Present server requests for input during this call. */
+    ui?: ElicitationUI,
   ): Promise<CallToolResult> {
     const config = this.definition(tool.server);
     if (
@@ -752,15 +828,26 @@ export class McpRuntime {
         "MCP tool was removed or its schema changed. Use mcp_tools with activate and its exact identifier to activate its current definition.",
       );
     const client = await waitFor(this.client(tool.server), signal);
+    const state = this.state(tool.server);
+    const deadline = new Deadline(config.toolTimeoutMs ?? config.timeoutMs ?? 30_000);
+    const scope = ui && this.options.interactive ? { ui, deadline, progress } : undefined;
+    if (scope) {
+      if (!state.scopes?.size) {
+        state.scopes = new Set();
+        state.scopesEnded = new AbortController();
+      }
+      state.scopes.add(scope);
+    }
     try {
       return await client.callTool(
         { name: tool.name, arguments: args },
         {
           signal: AbortSignal.any([
             this.lifetime.signal,
+            deadline.signal,
             ...(signal ? [signal] : []),
           ]),
-          timeout: config.toolTimeoutMs ?? config.timeoutMs ?? 30_000,
+          timeout: UNBOUNDED_TIMEOUT,
           onprogress: (event) =>
             progress?.(
               event.message ??
@@ -769,14 +856,117 @@ export class McpRuntime {
         },
       );
     } catch (error) {
-      const value = diagnose(error, {
+      const context = {
         server: tool.server,
-        operation: "call",
+        operation: "call" as const,
         oauth: usesOAuth(config),
         signal,
-      });
-      this.state(tool.server).error = value;
+      };
+      // The server refused to run the tool until the user completes a browser step.
+      if (scope && error instanceof ProtocolError && error.code === ProtocolErrorCode.UrlElicitationRequired) {
+        const required = requiredElicitations(error);
+        throw failure(
+          required ? await this.completeRequired(tool.server, state, scope, required, signal) : "protocol_error",
+          context,
+        );
+      }
+      const value = diagnose(error, context);
+      if (value.code !== "elicitation_required") state.error = value;
       throw new DiagnosticError(value);
+    } finally {
+      deadline.dispose();
+      if (scope) {
+        state.scopes?.delete(scope);
+        if (!state.scopes?.size) state.scopesEnded?.abort();
+      }
+    }
+  }
+
+  /** Server dialogs appear one at a time, in arrival order. */
+  private dialogs: Promise<unknown> = Promise.resolve();
+  private dialog<T>(work: () => Promise<T>, signal: AbortSignal): Promise<T> {
+    const run = this.dialogs.then(() => {
+      signal.throwIfAborted();
+      return work();
+    });
+    this.dialogs = run.catch(() => {});
+    return waitFor(run, signal);
+  }
+
+  /** Accept requests only while a tool call to this server can show them. */
+  private async elicit(
+    name: string,
+    state: ServerState,
+    token: object,
+    params: ElicitRequestParams,
+    signal: AbortSignal,
+  ): Promise<ElicitResult> {
+    const scopes = [...(state.scopes ?? [])];
+    const scope = scopes.at(-1);
+    if (!scope || !state.scopesEnded || state.connectionToken !== token || this.closing)
+      throw new ProtocolError(ProtocolErrorCode.InvalidRequest, "Elicitation is only accepted during an interactive tool call.");
+    if ((state.pendingElicitations ?? 0) >= MAX_PENDING_ELICITATIONS)
+      throw new ProtocolError(ProtocolErrorCode.InvalidRequest, "Too many pending elicitation requests.");
+    state.pendingElicitations = (state.pendingElicitations ?? 0) + 1;
+    // Time spent answering doesn't count against this server's call deadlines.
+    for (const each of scopes) each.deadline.pause();
+    const combined = AbortSignal.any([signal, this.lifetime.signal, state.scopesEnded.signal]);
+    try {
+      return await this.dialog(() => {
+        scope.progress?.("Waiting for your input…");
+        return elicit(scope.ui, name, params, combined);
+      }, combined);
+    } catch (error) {
+      if (combined.aborted) return { action: "cancel" };
+      throw error;
+    } finally {
+      state.pendingElicitations = (state.pendingElicitations ?? 1) - 1;
+      for (const each of scopes) each.deadline.resume();
+      if (!combined.aborted) scope.progress?.("Calling…");
+    }
+  }
+
+  /** Present a required browser step; never replay the refused call. */
+  private async completeRequired(
+    name: string,
+    state: ServerState,
+    scope: CallScope,
+    required: ElicitRequestURLParams[],
+    signal?: AbortSignal,
+  ): Promise<"elicitation_completed" | "elicitation_declined" | "cancelled"> {
+    const combined = AbortSignal.any([this.lifetime.signal, ...(signal ? [signal] : [])]);
+    const pending = new Set(required.map((item) => item.elicitationId));
+    const completed = new AbortController();
+    const awaiting = state.awaitingCompletion ??= new Map();
+    const listeners = new Map<string, () => void>();
+    for (const id of pending) {
+      const complete = () => {
+        pending.delete(id);
+        if (!pending.size) completed.abort();
+      };
+      listeners.set(id, complete);
+      const subscribers = awaiting.get(id) ?? new Set<() => void>();
+      subscribers.add(complete);
+      awaiting.set(id, subscribers);
+    }
+    try {
+      for (const params of required) {
+        scope.progress?.("Waiting for your input…");
+        const result = await this.dialog(() => elicit(scope.ui, name, params, combined), combined);
+        if (result.action !== "accept") return combined.aborted ? "cancelled" : "elicitation_declined";
+      }
+      const done = completed.signal.aborted ||
+        await this.dialog(() => awaitCompletion(scope.ui, name, completed.signal, combined), combined);
+      return done ? "elicitation_completed" : combined.aborted ? "cancelled" : "elicitation_declined";
+    } catch {
+      // Aborted dialogs, or a URL the dialog refused before asking.
+      return combined.aborted ? "cancelled" : "elicitation_declined";
+    } finally {
+      for (const [id, complete] of listeners) {
+        const subscribers = awaiting.get(id);
+        subscribers?.delete(complete);
+        if (!subscribers?.size) awaiting.delete(id);
+      }
     }
   }
 

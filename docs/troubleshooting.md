@@ -37,6 +37,9 @@ unavailable server isn't an empty catalog.
 | `subscriptions_unsupported` | Choose a server with subscription support, or ask the model to read when needed. |
 | `subscription_limit` | Remove a watch before adding another; the limit is 50 per connection. |
 | `catalog_changed` | Ask the model to retry discovery after the server catalog settles. |
+| `elicitation_required` | The server needs you to complete a step on a web page before the tool runs. Use an interactive session, then ask the model to retry. |
+| `elicitation_declined` | You declined or dismissed the server's web page request, so the tool didn't run. Ask the model to retry when you're ready. |
+| `elicitation_completed` | You completed the server's web page step. The tool didn't run yet; the model can call it again. |
 | `oauth_failed` | An unclassified OAuth failure. Check the service's requirements and `/mcp get <server>` for the client type, scopes, and callback URL. Only public/PKCE clients are supported, not clients requiring a secret. |
 | `oauth_client_required` | The server doesn't support dynamic registration. Configure `oauthClientId` for a registered public/PKCE client and register the exact callback URL. Reload, then log in again. |
 | `oauth_registration_rejected` | The server rejected dynamic registration. Check public/native client eligibility and the callback URL, or configure an approved public client ID. |

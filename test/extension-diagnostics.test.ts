@@ -1094,6 +1094,45 @@ test("native tools distinguish server-reported errors from cancelled calls", asy
   expect(JSON.stringify(cancelled)).not.toContain("private-token");
 });
 
+test("native tools present server requests only in interactive sessions", async () => {
+  const configuration = JSON.stringify({ mcpServers: { elicit: {
+    command: process.execPath,
+    args: [fileURLToPath(new URL("./fixtures/elicitation-server.ts", import.meta.url))],
+  } } });
+  const h = await host(configuration);
+  const titles: string[] = [];
+  const answers = ["1. Name", "Submit", "Decline"];
+  h.ctx.ui.select = async (title: string, options: string[]) => {
+    titles.push(title);
+    const answer = answers.shift()!;
+    return options.find((option) => option.startsWith(answer));
+  };
+  Object.assign(h.ctx.ui, { editor: async () => "pi" });
+  const loaded = await h.execute("mcp_tools", { activate: ["elicit.greet", "elicit.connect"] });
+  const [greet, connect] = loaded.details.loaded.map((tool: { nativeName: string }) => tool.nativeName);
+  const updates: string[] = [];
+  const greeting = await h.execute(greet, {}, (update) => updates.push(update.details.rows[0].label));
+  expect(greeting.content).toEqual([{ type: "text", text: "hello pi" }]);
+  expect(titles[0]).toStartWith("elicit requests information\nWho are you?");
+  expect(updates).toContain("elicit.greet \u00b7 Waiting for your input\u2026");
+  const declined = await h.execute(connect, {});
+  expect(declined.details.diagnostics[0].code).toBe("elicitation_declined");
+  expect(JSON.stringify(declined.content)).not.toContain("verify before retrying");
+  expect(titles[2]).toContain("URL: https://example.com/connect");
+  expect(answers).toEqual([]);
+
+  // Headless sessions never show dialogs and report that the step needs an interactive session.
+  const headless = await host(configuration);
+  headless.ctx.hasUI = false;
+  await headless.hooks.get("session_start")({}, headless.ctx);
+  headless.ctx.ui.select = async () => { throw new Error("No dialogs in headless sessions"); };
+  const activated = await headless.execute("mcp_tools", { activate: ["elicit.greet", "elicit.connect"] });
+  const [headlessGreet, headlessConnect] = activated.details.loaded.map((tool: { nativeName: string }) => tool.nativeName);
+  const refused = await headless.execute(headlessGreet, {});
+  expect(refused.details.diagnostics[0].code).toBe("tool_error");
+  expect((await headless.execute(headlessConnect, {})).details.diagnostics[0].code).toBe("elicitation_required");
+});
+
 test("resource completions are exclusive, bounded suggestions and never restore tools", async () => {
   const h = await host(JSON.stringify({ mcpServers: { example: fixtureServer } }));
   const complete = { server: "example", template: "schema://tables/{table}", argument: { name: "table", value: "e" } };

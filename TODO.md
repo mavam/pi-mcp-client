@@ -81,8 +81,10 @@ and [Claude Code MCP](https://code.claude.com/docs/en/mcp).
 
 ## Interactive MCP capabilities
 
-- [ ] **Elicitation:** Handle supported server requests for user input, with explicit
-  consent and clear cancellation or refusal in non-interactive sessions.
+- [x] **Elicitation:** Handle form and URL server requests during interactive tool
+  calls, with explicit consent, paused call deadlines, and required browser
+  steps that are never replayed automatically. Headless sessions don't declare
+  the capability. Requests during resource reads and prompt previews are refused.
 - [ ] **MCP Apps:** Investigate a suitable host for interactive tool interfaces.
   Require origin isolation and a permissions model; do not execute arbitrary
   server HTML inside the terminal.

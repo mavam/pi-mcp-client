@@ -142,7 +142,7 @@ server definition:
 | `excludeTools` | Denylist applied after `includeTools`. |
 | `timeoutMs` | Request timeout, from 100 to 600000 ms. Defaults: 15 seconds for discovery/HTTP requests, 30 seconds for stdio tool calls. |
 | `startupTimeoutMs` | Optional timeout for SDK connection setup and protocol negotiation, from 100 to 600000 ms. Defaults to `timeoutMs` or 15 seconds. |
-| `toolTimeoutMs` | Optional timeout for tool calls only, from 100 to 600000 ms. Overrides `timeoutMs` for calls without changing metadata or resource deadlines. |
+| `toolTimeoutMs` | Optional timeout for tool calls only, from 100 to 600000 ms. Overrides `timeoutMs` for calls without changing metadata or resource deadlines. Time spent answering [server requests](behavior.md#server-requests-for-input) doesn't count. |
 | `protocol` | `auto` (default) for SDK protocol-version negotiation, or `legacy` for an explicit legacy handshake. |
 
 OAuth client IDs, scopes, and callback ports require HTTP without an Authorization
