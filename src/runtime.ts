@@ -9,6 +9,7 @@ import {
   UriTemplate,
   type Transport,
 } from "@modelcontextprotocol/client";
+import packageJson from "../package.json" with { type: "json" };
 import {
   StdioClientTransport,
   getDefaultEnvironment,
@@ -129,7 +130,7 @@ export const createSdkConnector = (storeFactory: CredentialStoreFactory = creden
   const startupTimeout = config.startupTimeoutMs ?? timeout;
   let connecting = true;
   const client = new Client(
-    { name: "pi-mcp-client", version: "0.1.0" },
+    { name: "pi-mcp-client", version: packageJson.version },
     {
       listChanged: {
         tools: {
