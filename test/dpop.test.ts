@@ -128,12 +128,20 @@ for (const bearer of [false, true]) test(`SDK DPoP round trip, persistence, nonc
     expect((await runtime.discover()).diagnostics).toEqual([]);
     expect(f.attempts.refresh).toBe(1);
     expect(JSON.stringify(JSON.parse(store.read()!).dpopKey)).toBe(storedKey);
-    const provider = new OAuthProvider(f.identity, store, undefined, config);
-    expect(await provider.dpop()).toBe(await provider.dpop());
+    let reads = 0;
+    const countedStore = { ...store, read: () => { reads++; return store.read(); } };
+    const provider = new OAuthProvider(f.identity, countedStore, undefined, config);
+    const session = await provider.dpop();
+    reads = 0;
+    expect(await provider.dpop()).toBe(session);
+    expect(reads).toBe(1); // Warm proofs need one freshness check, not three.
     const stale = await connectionAuthProvider("example", config, async () => store);
     await stale!.dpop!();
     await runtime.close(); runtime = undefined;
-    await logout(f.identity, store);
+    const restoring = new OAuthProvider(f.identity, store, undefined, config).dpop();
+    const loggingOut = logout(f.identity, store);
+    await expect(restoring).rejects.toThrow("authentication_required");
+    await loggingOut;
     expect(store.read()).toBeNull();
     await expect(stale!.dpop!()).rejects.toThrow("authentication_required");
   } finally { await runtime?.close(); await f.stop(); await rm(directory, { recursive: true, force: true }); }
@@ -161,6 +169,17 @@ for (const bearer of [false, true]) for (const defect of ["missing", "corrupt", 
     expect(store.read()).toBe(original);
     expect(JSON.stringify(result)).not.toContain(data.tokens.access_token);
     if (defect === "missing") { await login(f.identity, store); expect(JSON.parse(store.read()!).dpopKey).toBeDefined(); }
+    else for (const manual of [false, true]) {
+      let opened = 0;
+      const tokenRequests = f.attempts.token;
+      await expect(authenticate(f.identity, async () => { opened++; }, undefined, store, {
+        oauthDpop: defect !== "disabled",
+        ...(manual ? { handoff: async () => { opened++; return undefined; } } : {}),
+      })).rejects.toThrow(defect === "issuer-mismatch" ? "oauth_issuer_changed" : "oauth_dpop_unavailable");
+      expect(opened).toBe(0);
+      expect(f.attempts.token).toBe(tokenRequests);
+      expect(store.read()).toBe(original);
+    }
   } finally { await runtime?.close(); await f.stop(); await rm(directory, { recursive: true, force: true }); }
 }, 15_000);
 
@@ -188,6 +207,22 @@ test("dynamic DPoP grants retain their issuer pin after key loss", async () => {
     expect(JSON.parse(store.read()!).grantIssuer).toBe(b.issuer);
   } finally { await a.stop(); await b.stop(); }
 }, 15_000);
+
+test("unbound Bearer requests skip DPoP keyring reads but still check token freshness", async () => {
+  const store = memoryStore();
+  const identity = { server: "example", url: "https://example.com/mcp" };
+  let reads = 0;
+  const provider = new OAuthProvider(identity, { ...store, read: () => { reads++; return store.read(); } });
+  provider.saveTokens({ access_token: "private", token_type: "Bearer" });
+  reads = 0;
+  expect(await provider.dpop()).toBeUndefined();
+  expect(reads).toBe(0);
+  expect(provider.tokens()?.access_token).toBe("private");
+  expect(reads).toBe(1);
+  store.remove();
+  expect(await provider.dpop()).toBeUndefined();
+  expect(() => provider.tokens()).toThrow("authentication_required");
+});
 
 test("DPoP configuration is explicit, OAuth-only, and safe to inspect", async () => {
   const config = { url: "https://example.com/mcp", oauthDpop: true };

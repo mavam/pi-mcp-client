@@ -26,7 +26,8 @@ for (const method of ["tools/call", "tools/list", "resources/read", "prompts/get
       expect(fixture.requests).not.toContain("token");
       const challenge = runtime.authorizationChallenge("example")!;
       expect(challenge.scopes).toEqual(["write"]);
-      const options = authorizationOptions(fixture.identity, fixture.store, { oauthScopes: ["base"] }, challenge.scopes);
+      const { options, grantedScopesKnown } = authorizationOptions(fixture.identity, fixture.store, { oauthScopes: ["base"] }, challenge.scopes);
+      expect(grantedScopesKnown).toBe(true);
       expect(options.oauthScopes?.sort()).toEqual(["base", "read", "write"]);
       await authenticate(fixture.identity, async () => { throw new Error("No browser"); }, undefined, fixture.store, {
         ...options, handoff: async (target) => {
@@ -51,7 +52,7 @@ test("successive scope upgrades and refresh retain omitted scopes", async () => 
   const f = scopeServer("tools/call", "write", { omitScopes: true });
   try {
     for (const required of ["write", "delete"]) {
-      const options = authorizationOptions(f.identity, f.store, { oauthScopes: ["read"] }, [required]);
+      const { options } = authorizationOptions(f.identity, f.store, { oauthScopes: ["read"] }, [required]);
       await authenticate(f.identity, async () => {}, undefined, f.store, { ...options, handoff: async target => {
         const url = new URL(target);
         const callback = new URL(url.searchParams.get("redirect_uri")!);
@@ -87,6 +88,19 @@ for (const outcome of ["cancel", "deny"] as const) test(`dynamic upgrades preser
     expect(f.requests).toEqual(["register"]);
     expect(f.store.read()).toBe(original);
   } finally { await f.stop(); }
+});
+
+test("scope review distinguishes unknown grants from explicitly empty grants", () => {
+  let record: string | null = null;
+  const store = { read: () => record, write: (value: string) => { record = value; }, remove: () => { record = null; } };
+  const identity = { server: "example", url: "https://example.com/mcp" };
+  const provider = new OAuthProvider(identity, store);
+  provider.saveTokens({ access_token: "private", token_type: "Bearer", issuer: "https://issuer.example" });
+  const plan = authorizationOptions(identity, store, {}, ["write"]);
+  expect(plan.grantedScopesKnown).toBe(false);
+  expect(plan.options.oauthScopes).toEqual(["write"]);
+  provider.saveTokens({ access_token: "private", token_type: "Bearer", issuer: "https://issuer.example", scope: "" });
+  expect(authorizationOptions(identity, store, {}, ["write"]).grantedScopesKnown).toBe(true);
 });
 
 test("challenge scope validation is bounded and diagnostics never echo server data", () => {

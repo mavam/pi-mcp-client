@@ -146,7 +146,7 @@ export function diagnostic(
     oauth_redirect_rejected: `Register the exact callback URL shown by /mcp get ${target}, including its host, port, and /callback path. --no-browser uses the same callback URL and does not bypass redirect validation.`,
     oauth_endpoint_insecure: "Use an authorization server with an HTTPS token endpoint. HTTP is only allowed for loopback endpoints; do not disable TLS verification.",
     oauth_issuer_changed: `Verify the server configuration before running /mcp logout ${target} and /mcp login ${target} to trust the new authorization server.`,
-    oauth_dpop_unavailable: `Enable oauthDpop and run /mcp reload, then /mcp login ${target}. If the stored key is corrupt, run /mcp logout ${target} before signing in again. Bound tokens cannot be used as Bearer tokens.`,
+    oauth_dpop_unavailable: `Enable oauthDpop and run /mcp reload, then /mcp login ${target}. If you intentionally disabled DPoP, or the stored key is corrupt or mismatched, run /mcp logout ${target} before signing in again. Bound access or refresh tokens cannot be used without their signing key.`,
     callback_unavailable: `Free the configured callback port, change oauthCallbackPort, or run /mcp login ${target} --no-browser.`,
     busy: "Wait for the current MCP operation to finish, then retry.",
     operation_failed:

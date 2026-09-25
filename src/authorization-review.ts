@@ -3,9 +3,10 @@ import { Text, truncateToWidth, type Component } from "@earendil-works/pi-tui";
 import { chooseOption } from "./prompt-selector.js";
 
 export async function reviewAuthorization(
-  ctx: ExtensionContext, server: string, requested: string[], combined: string[], signal: AbortSignal,
+  ctx: ExtensionContext, server: string, requested: string[], combined: string[], grantedScopesKnown: boolean, signal: AbortSignal,
 ): Promise<boolean> {
-  const text = `Server-requested scopes (untrusted data):\n${requested.join("\n")}\n\nLogin scopes (configured + granted + requested):\n${combined.join("\n")}\n\nApproval opens sign-in. The rejected operation is never replayed.`;
+  const warning = grantedScopesKnown ? "" : "Previously granted scopes are unknown and may not be retained. Configure oauthScopes with the permissions you need, or continue with the listed scopes.\n\n";
+  const text = `${warning}Server-requested scopes (untrusted data):\n${requested.join("\n")}\n\nLogin scopes (configured + known grants + requested):\n${combined.join("\n")}\n\nApproval opens sign-in. The rejected operation is never replayed.`;
   if (signal.aborted) return false;
   if (ctx.mode !== "tui") {
     const lines = new Text(text, 0, 0).render(70);

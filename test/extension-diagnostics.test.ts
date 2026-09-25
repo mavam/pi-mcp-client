@@ -109,6 +109,7 @@ for (const outcome of ["approve", "decline", "headless", "reload", "reload-input
     };
     (h.ctx.ui as any).input = async (message: string) => {
       if (outcome === "reload-input") await h.command("reload");
+      expect(message).toContain("Requested scopes: 2 reviewed scopes");
       const target = new URL(message.split("Open this URL in a browser:\n")[1].split("\n")[0]);
       expect(target.searchParams.get("scope")?.split(" ").sort()).toEqual(["read", "write"]);
       const callback = new URL(target.searchParams.get("redirect_uri")!);

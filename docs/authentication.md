@@ -234,9 +234,11 @@ authentication. Refresh tokens can be DPoP-bound independently; their binding is
 retained even if the access token is Bearer or the signing key is lost.
 `/mcp get example` shows whether DPoP is configured, not whether a grant is bound.
 
-If a bound access or refresh token's key is missing, sign in again at the same issuer. If the key is corrupt, use
-`/mcp logout example` before signing in. Disabling DPoP doesn't convert bound
-tokens to Bearer tokens: enable it again or log out and obtain a new grant.
+If a bound access or refresh token's key is missing, sign in again at the same
+issuer. If the key is corrupt or belongs to a different client, use
+`/mcp logout example` before signing in. Login checks the signing key before
+opening the browser. Disabling DPoP doesn't convert bound tokens to Bearer
+tokens: enable it again or log out and obtain a new grant.
 Logout removes the key and tokens locally and attempts remote token revocation.
 A changed issuer requires explicit logout before trusting its replacement.
 
@@ -259,7 +261,11 @@ You can also use `--no-browser`. Declining, cancelling sign-in, or a failed toke
 exchange leaves your existing grant unchanged. Reloading configuration cancels
 an active login. After signing in, explicitly retry the operation; sign-in never
 replays it. Successful grants retain their requested scopes even when the service
-omits the optional scope field from its token response.
+omits the optional scope field from its token response. If previously granted
+scopes are unknown, the review warns that they might not be retained. Configure
+`oauthScopes` with the permissions you need rather than relying on unspecified
+service defaults. After review, the sign-in dialog shows a scope count instead
+of repeating the full list.
 
 Scope names are untrusted service data, not instructions. Requests are bounded to
 100 scope names and kept only in this Pi session for ten minutes. Reloading

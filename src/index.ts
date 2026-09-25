@@ -24,7 +24,7 @@ import {
   type CatalogTool,
 } from "./catalog.js";
 import { authenticate, credentialStore, logout, type CredentialStoreFactory } from "./auth.js";
-import { authorizationOptions } from "./authorization.js";
+import { authorizationOptions, loginSummary } from "./authorization.js";
 import { reviewAuthorization } from "./authorization-review.js";
 import { McpRuntime, createSdkConnector, ToolContractError } from "./runtime.js";
 import { Exposure, restoredTools, TOOLS_TOOL } from "./exposure.js";
@@ -841,15 +841,16 @@ export default function mcpClient(
               throw failure("cancelled", { server, operation: "auth" });
             const challenge = loginRuntime.authorizationChallenge(server);
             if (challenge) {
-              options = { ...options, ...authorizationOptions(identity, store, options, challenge.scopes) };
-              const approved = await reviewAuthorization(ctx, server, challenge.scopes, options.oauthScopes!, signal);
+              const plan = authorizationOptions(identity, store, options, challenge.scopes);
+              options = { ...options, ...plan.options };
+              const approved = await reviewAuthorization(ctx, server, challenge.scopes, options.oauthScopes!, plan.grantedScopesKnown, signal);
               signal.throwIfAborted();
               if (!approved) throw failure("cancelled", { server, operation: "auth" });
               if (generation !== sessionGeneration || current() !== loginRuntime ||
                   loginRuntime.authorizationChallenge(server) !== challenge)
                 throw failure("cancelled", { server, operation: "auth" });
             }
-            const summary = `Requested scopes: ${options.oauthScopes?.join(", ") ?? "SDK/server defaults"}\nCallback: http://127.0.0.1:${options.oauthCallbackPort ?? 19847}/callback`;
+            const summary = loginSummary(options, !!challenge);
             if (extra[0] === "--no-browser") {
               await authenticate(identity, open, signal, store, {
                 ...options,

@@ -111,6 +111,7 @@ export class OAuthProvider implements OAuthClientProvider {
   private discovery?: OAuthDiscoveryState;
   private requestedScope?: string;
   private dpopSession?: Promise<DpopSession>;
+  private resolvedDpopSession?: DpopSession;
   readonly expectedState = randomUUID();
   private readonly clientId?: string;
   constructor(
@@ -158,6 +159,9 @@ export class OAuthProvider implements OAuthClientProvider {
   }
   clientInformation(ctx?: OAuthClientInformationContext) {
     this.assertCurrent();
+    return this.lookupClientInformation(ctx);
+  }
+  private lookupClientInformation(ctx?: OAuthClientInformationContext) {
     if (!ctx) return undefined;
     const grantIssuer = this.data.grantIssuer ?? this.data.tokens?.issuer;
     if ((grantIssuer && grantIssuer !== ctx.issuer) ||
@@ -193,6 +197,7 @@ export class OAuthProvider implements OAuthClientProvider {
       if (this.data.tokens?.issuer === ctx.issuer) delete this.data.tokens;
       delete this.data.dpopKey;
       this.dpopSession = undefined;
+      this.resolvedDpopSession = undefined;
     }
     this.data.clients = { ...this.data.clients, [ctx.issuer]: info };
     if (!this.clientId) this.data.registrations = {
@@ -224,16 +229,19 @@ export class OAuthProvider implements OAuthClientProvider {
     this.save();
   }
   async dpop(): Promise<DpopSession | undefined> {
-    this.assertCurrent();
     // An AS can issue Bearer access tokens with DPoP-bound refresh tokens.
     const bound = this.data.tokens?.token_type?.toLowerCase() === "dpop" ||
       (!!this.data.tokens?.refresh_token && !!this.data.dpopRefreshBound);
+    // No key is returned on this path. The SDK's tokens() call still checks
+    // freshness before it sends or refreshes credentials.
+    if (!this.options.oauthDpop && !bound) return undefined;
+    this.assertCurrent();
     if (!this.options.oauthDpop) {
       if (bound) throw failure("oauth_dpop_unavailable", { operation: "auth" });
       return undefined;
     }
     const issuer = this.discovery?.authorizationServerMetadata?.issuer ?? this.discovery?.authorizationServerUrl ?? this.data.tokens?.issuer;
-    const client = issuer ? this.clientInformation({ issuer }) : undefined;
+    const client = issuer ? this.lookupClientInformation({ issuer }) : undefined;
     if (!issuer || !client) {
       if (bound) throw failure("oauth_dpop_unavailable", { operation: "auth" });
       return undefined;
@@ -244,6 +252,7 @@ export class OAuthProvider implements OAuthClientProvider {
     }
     if (this.data.dpopKey && (this.data.dpopKey.issuer !== issuer || this.data.dpopKey.clientId !== client.client_id))
       throw failure("oauth_dpop_unavailable", { operation: "auth" });
+    if (this.resolvedDpopSession) return this.resolvedDpopSession;
     this.dpopSession ??= (async () => {
       if (!this.data.dpopKey) {
         const key = await createDpopKey(issuer, client.client_id);
@@ -255,7 +264,8 @@ export class OAuthProvider implements OAuthClientProvider {
       catch { throw failure("oauth_dpop_unavailable", { operation: "auth" }); }
     })();
     const session = await this.dpopSession;
-    this.assertCurrent();
+    this.assertCurrent(); // Key generation/import crossed an asynchronous boundary.
+    this.resolvedDpopSession = session;
     return session;
   }
   saveCodeVerifier(value: string) {
@@ -282,6 +292,9 @@ export class OAuthProvider implements OAuthClientProvider {
       )
     )
       throw new Error("Refusing an insecure authorization URL.");
+    // Fail before browser consent if the old grant's DPoP state needs repair.
+    // Generated keys remain staged until this explicit login succeeds.
+    await this.dpop();
     // OAuth permits omitting scope when the grant matches the request.
     this.requestedScope = url.searchParams.get("scope") ?? undefined;
     await this.redirect(url);
@@ -292,6 +305,7 @@ export class OAuthProvider implements OAuthClientProvider {
       delete this.data.registrations;
       delete this.data.dpopKey;
       this.dpopSession = undefined;
+      this.resolvedDpopSession = undefined;
     }
     if (scope === "all" || scope === "tokens") delete this.data.tokens;
     if (scope === "all" || scope === "verifier") this.verifier = undefined;

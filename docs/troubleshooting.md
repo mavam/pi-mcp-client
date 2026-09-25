@@ -45,6 +45,8 @@ unavailable server isn't an empty catalog.
 | `oauth_registration_rejected` | The server rejected dynamic registration. Check public/native client eligibility and the callback URL, or configure an approved public client ID. |
 | `oauth_client_rejected` | Check the client ID, app approval, and public-client authentication (token endpoint method `none`). A rejected client doesn't necessarily mean a client secret is required. |
 | `oauth_pkce_unsupported` | The authorization server must support S256 PKCE. Login without PKCE isn't supported. |
+| `oauth_scope_required` | Run `/mcp login <server>` to review additional permissions, then explicitly retry the operation. |
+| `oauth_dpop_unavailable` | Enable DPoP again, or log out before signing in if you disabled it deliberately or its stored key is corrupt or mismatched. |
 | `oauth_scope_rejected` | Check `oauthScopes` against the service's allowed scopes and app permissions. Reload after changes, then log in again. |
 | `oauth_grant_rejected` | Log in again for a fresh code. If it still fails, check the client and exact callback URL. |
 | `oauth_redirect_rejected` | Register the exact callback host, port, and `/callback` path shown by `/mcp get <server>`. Manual login uses the same callback URL. |
@@ -71,6 +73,14 @@ classified by potentially sensitive message text. Server-provided tool results
 remain visible as content, even when the tool reports an error; they aren't
 sanitized transport diagnostics. Tool-call failures aren't replayed automatically;
 verify the outcome before retrying.
+
+## OAuth warnings in the terminal
+
+The MCP SDK can print a sanitized warning when a refresh token expires or is
+revoked. In an interactive terminal, this can temporarily disrupt the display
+until Pi redraws it. Remote error details are removed, but these SDK warnings
+can't currently be routed through Pi's UI. Follow the accompanying diagnostic
+if another login is needed; the warning alone doesn't mean sign-in started.
 
 ## Missing project servers
 
