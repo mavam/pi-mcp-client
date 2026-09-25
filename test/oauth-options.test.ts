@@ -177,10 +177,10 @@ for (const mode of ["browser", "manual", "cancel", "abort", "denied", "wrong-sta
       } else {
         await expect(login).rejects.toThrow(mode === "cancel" || mode === "abort" ? "cancelled" : "oauth_failed");
         expect(tokenRequests).toBe(0);
-        expect(store.read()).not.toContain("private-token");
+        expect(store.read()).toBeNull();
       }
-      expect(store.read()).not.toContain("private-code");
-      expect(store.read()).not.toContain("code_verifier");
+      expect(store.read() ?? "").not.toContain("private-code");
+      expect(store.read() ?? "").not.toContain("code_verifier");
     } finally {
       occupied?.stop(true);
       await server.stop(true);

@@ -126,7 +126,7 @@ for (const rejectClient of [false, true]) {
     try {
       if (rejectClient) {
         await expect(authenticate({ server: "example", url, clientId: "registered-client" }, open, AbortSignal.timeout(10_000), store)).rejects.toThrow("oauth_client_rejected");
-        expect(store.read()).not.toContain("private-error");
+        expect(store.read()).toBeNull();
         expect(new OAuthProvider({ server: "example", url, clientId: "registered-client" }, store).tokens()).toBeUndefined();
       } else {
         const unattended = new OAuthProvider({ server: "example", url, clientId: "registered-client" }, store);

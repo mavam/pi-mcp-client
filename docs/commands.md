@@ -20,7 +20,7 @@ The model's separate interface is documented in the [tool reference](tool-refere
 | `/mcp reload` | Apply configuration changes without restarting Pi. |
 | `/mcp enable <server>` | Enable a server in its effective configuration file. |
 | `/mcp disable <server>` | Disable a server, close its connection, and deactivate its tools. |
-| `/mcp login <server> [--no-browser]` | Authenticate an HTTP server without changing its configuration; optionally paste the callback URL in an interactive dialog. |
+| `/mcp login <server> [--no-browser]` | Authenticate an HTTP server or review additional permissions it requested; optionally paste the callback URL in an interactive dialog. Configuration stays unchanged. |
 | `/mcp logout <server>` | Remove local OAuth credentials and attempt remote revocation, including for disabled servers. |
 | `/mcp reconnect <server>` | Replace a connection and refresh its catalog. |
 | `/mcp refresh <server>` | Refresh tool, resource, and prompt metadata without fetching content or loading additional tools. |

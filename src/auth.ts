@@ -103,6 +103,7 @@ export class OAuthProvider implements OAuthClientProvider {
   private readonly key: string;
   private verifier?: string;
   private discovery?: OAuthDiscoveryState;
+  private requestedScope?: string;
   readonly expectedState = randomUUID();
   private readonly clientId?: string;
   constructor(
@@ -198,7 +199,9 @@ export class OAuthProvider implements OAuthClientProvider {
       const info = this.clientInformation({ issuer: tokens.issuer })!;
       this.data.clients = { ...this.data.clients, [tokens.issuer]: info };
     }
-    this.data.tokens = tokens;
+    const scope = tokens.scope ?? this.requestedScope ??
+      (tokens.issuer === this.data.tokens?.issuer ? this.data.tokens?.scope : undefined);
+    this.data.tokens = { ...tokens, ...(scope !== undefined ? { scope } : {}) };
     this.save();
   }
   saveCodeVerifier(value: string) {
@@ -225,6 +228,8 @@ export class OAuthProvider implements OAuthClientProvider {
       )
     )
       throw new Error("Refusing an insecure authorization URL.");
+    // OAuth permits omitting scope when the grant matches the request.
+    this.requestedScope = url.searchParams.get("scope") ?? undefined;
     await this.redirect(url);
   }
   invalidateCredentials(scope: "all" | "client" | "tokens" | "verifier" | "discovery") {
@@ -383,9 +388,26 @@ export async function authenticate(
   const callback = new Promise<URLSearchParams>((resolve) => {
     resolveCallback = resolve;
   });
+  const backing = store ?? (await credentialStore(identity));
+  const original = backing.read();
+  const epoch = credentialEpochs.get(credentialKey(identity)) ?? 0;
+  let staged = original;
+  const guard = () => {
+    deadline.throwIfAborted();
+    if ((credentialEpochs.get(credentialKey(identity)) ?? 0) !== epoch || backing.read() !== original)
+      throw failure("authentication_required", { operation: "auth" });
+  };
+  // A fresh grant is transactional: registration and token invalidation during
+  // login cannot destroy the working grant if the user cancels or the AS fails.
+  const pending: SecretStore = {
+    read: () => { guard(); return staged; },
+    write: value => { guard(); staged = value; },
+    remove: () => { guard(); staged = null; },
+  };
+  const commit = () => { guard(); if (staged !== null) backing.write(staged); };
   const provider = new OAuthProvider(
     identity,
-    store ?? (await credentialStore(identity)),
+    pending,
     async (target) => {
       deadline.throwIfAborted();
       if (!options.handoff) return open(target.href);
@@ -433,7 +455,7 @@ export async function authenticate(
       serverUrl: url, fetchFn, forceReauthorization: true,
       scope: options.oauthScopes?.join(" "),
     });
-    if (result === "AUTHORIZED") return;
+    if (result === "AUTHORIZED") { commit(); return; }
     const params = await waitFor(callback, deadline);
     if (params.has("error") || !params.get("code"))
       throw new Error("OAuth authorization was not granted.");
@@ -446,6 +468,7 @@ export async function authenticate(
     });
     try {
       await transport.finishAuth(params);
+      commit();
     } finally {
       await transport.close();
     }

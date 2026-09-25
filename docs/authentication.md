@@ -200,6 +200,35 @@ sharing a name, URL, and client ID still share credentials. Explicit login renew
 dynamic registration when its requested options change. `/mcp get example` shows
 the requested scopes and callback address without connecting.
 
+## Approve additional permissions
+
+A server can reject a request with an OAuth scope challenge—for example, when
+searching works but creating an issue requires write access. The operation stops
+with `oauth_scope_required`; it doesn't open a browser or retry automatically.
+
+Run the indicated command yourself:
+
+```text
+/mcp login example
+```
+
+Page through the server's requested scope names and the combined set of configured,
+previously granted, and requested scopes. In the terminal, press `a` on the last
+page to approve; in RPC, select **Approve sign-in**. Approving starts a fresh login.
+You can also use `--no-browser`. Declining, cancelling sign-in, or a failed token
+exchange leaves your existing grant unchanged. Reloading configuration cancels
+an active login. After signing in, explicitly retry the operation; sign-in never
+replays it. Successful grants retain their requested scopes even when the service
+omits the optional scope field from its token response.
+
+Scope names are untrusted service data, not instructions. Requests are bounded to
+100 scope names and kept only in this Pi session for ten minutes. Reloading
+configuration, ending the session, or logging out discards them. Login uses the
+configured server's OAuth discovery, not URLs supplied in a scope challenge.
+Invalid or missing scope names require checking `oauthScopes` against the service's
+requirements instead. Headless operation reports the challenge but cannot approve
+additional permissions.
+
 ## Sign in remotely or without launching a browser
 
 When Pi runs over SSH, or you don't want it to launch a browser, use:

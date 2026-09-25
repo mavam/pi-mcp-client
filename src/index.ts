@@ -24,6 +24,8 @@ import {
   type CatalogTool,
 } from "./catalog.js";
 import { authenticate, credentialStore, logout, type CredentialStoreFactory } from "./auth.js";
+import { authorizationOptions } from "./authorization.js";
+import { reviewAuthorization } from "./authorization-review.js";
 import { McpRuntime, createSdkConnector, ToolContractError } from "./runtime.js";
 import { Exposure, restoredTools, TOOLS_TOOL } from "./exposure.js";
 import { convertResult, convertResourceResult, textResult, type ClientDetails } from "./output.js";
@@ -273,6 +275,7 @@ export default function mcpClient(
         return false;
       }
     });
+    loginController?.abort();
     promptController?.abort();
     if (mutation?.action !== "import") importController?.abort();
     const old = runtime;
@@ -287,6 +290,7 @@ export default function mcpClient(
 
   pi.on("session_start", async (_event, ctx) => {
     const generation = ++sessionGeneration;
+    loginController?.abort();
     promptController?.abort();
     importController?.abort();
     trustController?.abort();
@@ -819,7 +823,7 @@ export default function mcpClient(
           if (Object.keys(config[server].headers ?? {}).some((name) => name.toLowerCase() === "authorization"))
             throw new CommandUsageError("This server uses an Authorization header. Remove it from the server definition before using /mcp login, or keep using header authentication.");
           const identity = oauthSettings(server, config[server], ctx.cwd);
-          const options = config[server];
+          let options = config[server];
           const loginRuntime = current();
           const open = async (target: string) => {
             // Authorization URLs stay out of notifications and session history.
@@ -835,6 +839,16 @@ export default function mcpClient(
             const store = await storeFactory(identity);
             if (generation !== sessionGeneration || current() !== loginRuntime)
               throw failure("cancelled", { server, operation: "auth" });
+            const challenge = loginRuntime.authorizationChallenge(server);
+            if (challenge) {
+              options = { ...options, ...authorizationOptions(identity, store, options, challenge.scopes) };
+              const approved = await reviewAuthorization(ctx, server, challenge.scopes, options.oauthScopes!, signal);
+              signal.throwIfAborted();
+              if (!approved) throw failure("cancelled", { server, operation: "auth" });
+              if (generation !== sessionGeneration || current() !== loginRuntime ||
+                  loginRuntime.authorizationChallenge(server) !== challenge)
+                throw failure("cancelled", { server, operation: "auth" });
+            }
             const summary = `Requested scopes: ${options.oauthScopes?.join(", ") ?? "SDK/server defaults"}\nCallback: http://127.0.0.1:${options.oauthCallbackPort ?? 19847}/callback`;
             if (extra[0] === "--no-browser") {
               await authenticate(identity, open, signal, store, {
@@ -870,6 +884,7 @@ export default function mcpClient(
                 throw authError ?? failure("cancelled", { server, operation: "auth" });
             } else await authenticate(identity, open, signal, store, options);
             if (generation !== sessionGeneration || current() !== loginRuntime) throw failure("cancelled", { server, operation: "auth" });
+            if (challenge) loginRuntime.clearAuthorizationChallenge(server, challenge);
             await loginRuntime.reconnect(server);
           } finally {
             if (loginController === controller) loginController = undefined;

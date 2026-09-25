@@ -8,6 +8,8 @@ import {
   SdkError,
   SdkErrorCode,
   StreamableHTTPClientTransport,
+  extractWWWAuthenticateParams,
+  computeScopeUnion,
   type CallToolResult,
   type ElicitRequestParams,
   type ElicitRequestURLParams,
@@ -34,6 +36,7 @@ import { prepareTool, type CatalogTool } from "./catalog.js";
 import { prepareResource, prepareResourceTemplate, validTemplateRead, validResourceUri, validCompletion, type CompletionTarget, type TemplateTarget, type CatalogResource, type DiscoveryKind } from "./resources.js";
 import { connectionAuthProvider, credentialStore, type CredentialStoreFactory } from "./auth.js";
 import { privateOAuthFetch } from "./oauth-fetch.js";
+import { parseScopes, type ScopeChallenge } from "./authorization.js";
 import { preparePrompt, validPromptArguments, type CatalogPrompt } from "./prompts.js";
 import { ResourceSubscriptions } from "./subscriptions.js";
 import { resolveSecrets } from "./secrets.js";
@@ -106,6 +109,7 @@ export interface Discovery {
   warnings: string[];
 }
 export interface ConnectionHandlers {
+  scopeChallenge?: (scope: string | undefined) => void;
   toolsChanged?: () => void;
   resourcesChanged?: () => void;
   promptsChanged?: () => void;
@@ -229,6 +233,8 @@ export const createSdkConnector = (storeFactory: CredentialStoreFactory = creden
     : new StreamableHTTPClientTransport(new URL(config.url!), {
         requestInit: { headers: config.headers },
         authProvider: await connectionAuthProvider(name, config, storeFactory),
+        // Approval and resubmission belong to the user, not transport retries.
+        onInsufficientScope: "throw",
         // Bound HTTP responses (including OAuth), but not established SSE streams.
         // Accommodate startup/tool overrides; the SDK enforces each request's tighter deadline.
         fetch: async (input, init) => {
@@ -247,6 +253,10 @@ export const createSdkConnector = (storeFactory: CredentialStoreFactory = creden
                 ...(init?.signal ? [init.signal] : []),
               ]),
             });
+            if (response.status === 403 && usesOAuth(config)) {
+              const challenge = extractWWWAuthenticateParams(response);
+              if (challenge.error === "insufficient_scope") handlers?.scopeChallenge?.(challenge.scope);
+            }
             if (response.headers.get("content-type")?.split(";")[0].trim() === "text/event-stream")
               clearTimeout(timer);
             return response;
@@ -277,6 +287,7 @@ export const connectSdk = createSdkConnector();
 
 export class McpRuntime {
   private readonly states = new Map<string, ServerState>();
+  private readonly scopeChallenges = new Map<string, ScopeChallenge>();
   private readonly lifetime = new AbortController();
   private closing?: Promise<void>;
   constructor(
@@ -287,6 +298,19 @@ export class McpRuntime {
     /** Interactive sessions declare elicitation support to servers. */
     private readonly options: { interactive?: boolean } = {},
   ) {}
+
+  /** Challenges are session-local, expire, and never survive configuration changes. */
+  authorizationChallenge(name: string): ScopeChallenge | undefined {
+    const challenge = this.scopeChallenges.get(name);
+    if (!challenge || challenge.expires < Date.now() || challenge.identity !== this.identity(name)) {
+      this.scopeChallenges.delete(name);
+      return undefined;
+    }
+    return challenge;
+  }
+  clearAuthorizationChallenge(name: string, approved: ScopeChallenge) {
+    if (this.scopeChallenges.get(name) === approved) this.scopeChallenges.delete(name);
+  }
 
   onResourceUpdated?: (server: string, uri: string) => void;
   private subscriptionGeneration = 0;
@@ -358,6 +382,14 @@ export class McpRuntime {
         ),
         this.lifetime.signal,
         {
+          scopeChallenge: (scope) => {
+            if (this.closing || this.lifetime.signal.aborted || state.connectionToken !== token) return;
+            const scopes = parseScopes(scope);
+            const previous = this.authorizationChallenge(name);
+            const union = scopes && parseScopes(computeScopeUnion(previous?.scopes.join(" "), scopes.join(" ")));
+            if (union) this.scopeChallenges.set(name, { scopes: union, identity, expires: Date.now() + 600_000 });
+            else this.scopeChallenges.delete(name);
+          },
           toolsChanged: () => {
             if (
               this.closing ||
@@ -979,6 +1011,7 @@ export class McpRuntime {
         throw failure("busy", { server: name, operation: "auth" });
     }
     await Promise.all(names.map(async (name) => {
+      this.scopeChallenges.delete(name);
       const state = this.states.get(name);
       if (!state) return;
       state.connectionToken = undefined;
@@ -1037,6 +1070,7 @@ export class McpRuntime {
     return (this.closing ??= this.shutdown());
   }
   private async shutdown(): Promise<void> {
+    this.scopeChallenges.clear();
     await this.clearResourceSubscriptions();
     // Send subscription cancellation while HTTP is still usable, then abort work.
     await Promise.all(
