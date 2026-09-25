@@ -1,0 +1,9 @@
+created: 2026-09-25
+title: Interactive server requests
+intro: >-
+  Pi MCP Client now supports interactive input and browser requests from MCP servers
+  during tool calls. It also reports its installed version accurately during connection
+  setup.
+source:
+  mode: sync-stable-queue
+  previous_stable: v0.8.1
