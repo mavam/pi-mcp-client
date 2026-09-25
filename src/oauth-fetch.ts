@@ -25,12 +25,16 @@ export async function privateOAuthFetch(input: string | URL | Request, init?: Re
     } finally {
       await reader?.cancel();
     }
-    const text = Buffer.concat(chunks).toString("utf8");
+    const text = new TextDecoder().decode(Buffer.concat(chunks));
     let body: unknown;
     try { body = JSON.parse(text); } catch { body = undefined; }
     if (!response.ok || (body && typeof body === "object" && "error" in body)) {
       const code = body && typeof body === "object" && "error" in body ? body.error : undefined;
-      return Response.json({ error: typeof code === "string" && codes.has(code) ? code : "server_error" }, {
+      // The SDK validates tokens before considering an error. Preserve successful
+      // token fields (including responses with an incidental `error` property).
+      const payload = response.ok && body && typeof body === "object" ? { ...body } : {};
+      return Response.json({ ...payload, error: typeof code === "string" && codes.has(code) ? code : "server_error",
+        error_description: undefined, error_uri: undefined }, {
         status: response.status, headers: response.headers,
       });
     }
