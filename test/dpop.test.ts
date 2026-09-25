@@ -42,7 +42,7 @@ async function service(bearer = false) {
     const header = decodeProtectedHeader(proof);
     expect(header.typ).toBe("dpop+jwt");
     expect(header.alg).toBe("ES256");
-    expect(header.jwk?.d).toBeUndefined();
+    expect(Object.keys(header.jwk ?? {})).not.toContain("d");
     const key = await importJWK(header.jwk!, "ES256");
     const { payload } = await jwtVerify(proof, key, { algorithms: ["ES256"] });
     expect(payload.htm).toBe(request.method);
