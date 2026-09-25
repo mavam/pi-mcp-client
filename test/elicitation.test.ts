@@ -351,6 +351,41 @@ test("required browser steps wait for completion and are never replayed", async 
   expect(overreach.titles).toEqual([]);
 });
 
+for (const cancelFirst of [false, true]) {
+  test(`shared browser-step completion ${cancelFirst ? "survives another call's cancellation" : "notifies every waiting call"}`, async () => {
+    const probe: ServerProbe = { calls: 0 };
+    const { runtime, tool, servers } = await inMemory(true, probe);
+    const abort = new AbortController();
+    const firstWaiting = Promise.withResolvers<void>();
+    const secondRegistered = Promise.withResolvers<void>();
+    const secondWaiting = Promise.withResolvers<void>();
+    const first = fakeUi(["I'll open it myself", (title, choices, signal) => {
+      firstWaiting.resolve();
+      return never(title, choices, signal);
+    }]);
+    const second = fakeUi(["I'll open it myself", (title, choices, signal) => {
+      secondWaiting.resolve();
+      return never(title, choices, signal);
+    }]);
+    const firstCall = runtime.call(tool("connect"), {}, abort.signal, undefined, first.ui).catch((error) => error);
+    await firstWaiting.promise;
+    const secondCall = runtime.call(tool("connect"), {}, undefined, () => secondRegistered.resolve(), second.ui)
+      .catch((error) => error);
+    // Registration precedes the progress update, even while this dialog is queued.
+    await secondRegistered.promise;
+    if (cancelFirst) {
+      abort.abort(new Error("stop"));
+      expect((await firstCall).diagnostic.code).toBe("cancelled");
+      await secondWaiting.promise;
+    }
+    await servers[0].server.createElicitationCompletionNotifier("grant-1")();
+    const [firstResult, secondResult] = await Promise.all([firstCall, secondCall]);
+    expect(firstResult.diagnostic.code).toBe(cancelFirst ? "cancelled" : "elicitation_completed");
+    expect(secondResult.diagnostic.code).toBe("elicitation_completed");
+    expect(probe.calls).toBe(2);
+  });
+}
+
 test("2026-07-28 input_required rounds use the same dialogs over HTTP", async () => {
   const directory = await mkdtemp(join(tmpdir(), "mcp-elicit-http-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));

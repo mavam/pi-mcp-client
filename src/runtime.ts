@@ -64,7 +64,7 @@ interface ServerState extends ResourceMetadataCache {
   scopes?: Set<CallScope>;
   scopesEnded?: AbortController;
   pendingElicitations?: number;
-  awaitingCompletion?: Map<string, () => void>;
+  awaitingCompletion?: Map<string, Set<() => void>>;
   client?: Client;
   transport?: Transport;
   connecting?: Promise<Client>;
@@ -391,7 +391,8 @@ export class McpRuntime {
           ...(this.options.interactive ? {
             elicit: (params: ElicitRequestParams, signal: AbortSignal) => this.elicit(name, state, token, params, signal),
             elicitationComplete: (id: string) => {
-              if (state.connectionToken === token) state.awaitingCompletion?.get(id)?.();
+              if (state.connectionToken === token)
+                for (const complete of state.awaitingCompletion?.get(id) ?? []) complete();
             },
           } : {}),
         },
@@ -937,12 +938,17 @@ export class McpRuntime {
     const pending = new Set(required.map((item) => item.elicitationId));
     const completed = new AbortController();
     const awaiting = state.awaitingCompletion ??= new Map();
-    for (const id of pending)
-      awaiting.set(id, () => {
-        awaiting.delete(id);
+    const listeners = new Map<string, () => void>();
+    for (const id of pending) {
+      const complete = () => {
         pending.delete(id);
         if (!pending.size) completed.abort();
-      });
+      };
+      listeners.set(id, complete);
+      const subscribers = awaiting.get(id) ?? new Set<() => void>();
+      subscribers.add(complete);
+      awaiting.set(id, subscribers);
+    }
     try {
       for (const params of required) {
         scope.progress?.("Waiting for your input…");
@@ -956,7 +962,11 @@ export class McpRuntime {
       // Aborted dialogs, or a URL the dialog refused before asking.
       return combined.aborted ? "cancelled" : "elicitation_declined";
     } finally {
-      for (const { elicitationId } of required) awaiting.delete(elicitationId);
+      for (const [id, complete] of listeners) {
+        const subscribers = awaiting.get(id);
+        subscribers?.delete(complete);
+        if (!subscribers?.size) awaiting.delete(id);
+      }
     }
   }
 
