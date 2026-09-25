@@ -91,17 +91,21 @@ export function formFields(schema: ElicitRequestFormParams["requestedSchema"]): 
   });
 }
 
+const validDate = (value: string): boolean =>
+  /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) &&
+  new Date(`${value}T00:00:00Z`).toISOString().startsWith(value);
+
 const formats: Record<string, { name: string; valid: (value: string) => boolean }> = {
   email: { name: "email address", valid: (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(value) },
   uri: { name: "absolute URI", valid: (value) => URL.canParse(value) },
   date: {
     name: "date (YYYY-MM-DD)",
-    valid: (value) => /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) &&
-      new Date(`${value}T00:00:00Z`).toISOString().startsWith(value),
+    valid: validDate,
   },
   "date-time": {
     name: "date and time (RFC 3339)",
-    valid: (value) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/i.test(value) && !Number.isNaN(Date.parse(value)),
+    valid: (value) => /^\d{4}-\d{2}-\d{2}T([01]\d|2[0-3]):[0-5]\d:[0-5]\d(\.\d+)?(Z|[+-]([01]\d|2[0-3]):[0-5]\d)$/i.test(value) &&
+      validDate(value.slice(0, 10)) && !Number.isNaN(Date.parse(value)),
   },
 };
 

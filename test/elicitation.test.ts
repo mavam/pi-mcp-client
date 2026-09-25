@@ -120,6 +120,19 @@ test("values are validated against their field constraints", () => {
   expect(problem(uri, "not a uri")).toBeDefined();
 });
 
+test("date-time fields reject normalized dates and out-of-range clock components", () => {
+  const [field] = formFields({ type: "object", properties: { stamp: { type: "string", format: "date-time" } } });
+  for (const value of [
+    "2026-02-30T10:00:00Z", "2026-02-29T10:00:00+01:00", "2026-04-31T10:00:00Z",
+    "1900-02-29T10:00:00Z", "2026-02-28T24:00:00Z", "2026-02-28T10:60:00Z",
+    "2026-02-28T10:00:00+24:00", "2026-02-28T10:00:00+01:60",
+  ]) expect(problem(field, value)).toBeDefined();
+  for (const value of [
+    "2024-02-29T23:59:59Z", "2000-02-29T10:00:00Z", "2026-03-01T00:00:00+01:00",
+    "2026-12-31T23:59:59.123-05:30", "2026-02-28t10:00:00z",
+  ]) expect(problem(field, value)).toBeUndefined();
+});
+
 test("forms prefill defaults, require explicit review, and submit only reviewed values", async () => {
   const { ui, titles, notices } = fakeUi(
     ["Submit", "1. Full name", "2. email", "6. tags", "☐ 1. a", "☐ 3. c", "Done", "Submit"],
