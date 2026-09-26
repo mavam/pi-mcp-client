@@ -1,0 +1,9 @@
+created: 2026-09-26
+title: Safer, more reliable OAuth
+intro: >-
+  OAuth authentication is more secure and predictable. The client now supports DPoP-bound
+  tokens, requires explicit approval for additional permissions, and handles connection
+  failures and cancellation more reliably.
+source:
+  mode: sync-stable-queue
+  previous_stable: v0.9.0
