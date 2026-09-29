@@ -1336,3 +1336,17 @@ test("native tools join a namespace, forward hints, and give scripts the whole r
   expect(result.structuredContent).toEqual({ content: [{ type: "text", text: "hello" }] });
   expect(result.content).toEqual([{ type: "text", text: "hello" }]);
 });
+
+test("an invalid server is skipped with a warning while the others keep working", async () => {
+  const h = await host(JSON.stringify({ mcpServers: {
+    example: fixtureServer,
+    broken: { command: "node", toolExposure: { echo: "sometimes" }, env: { KEY: "private-secret" } },
+  } }));
+  expect(h.notifications.some((text) => text.includes("invalid toolExposure for server broken"))).toBe(true);
+  expect(h.notifications.join("\n")).not.toContain("private-secret");
+  const loaded = await h.execute("mcp_tools", { activate: ["example.echo"] });
+  expect(loaded.details.loaded).toHaveLength(1);
+  await h.command("");
+  expect(h.notifications.at(-1)).toContain("example");
+  expect(h.notifications.at(-1)).not.toContain("broken");
+});

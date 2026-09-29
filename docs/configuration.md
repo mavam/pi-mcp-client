@@ -169,6 +169,14 @@ Tool filters don't restrict resource reads. See
 [trust and permissions](behavior.md#trust-and-permissions) for access boundaries
 and [authentication](authentication.md) for OAuth setup.
 
+## Invalid servers
+
+An invalid server entry is skipped with a warning, and the other servers still
+load, as in Pi's built-in MCP support. Warnings name the server and the invalid
+field, never its values. A file that isn't valid JSON, or that has no `mcpServers`
+object, fails as a whole. Skipped entries stay in the file, so you can fix them or
+remove them with `/mcp remove`.
+
 ## Apply changes
 
 After editing a file, run `/mcp reload`. The extension validates the new

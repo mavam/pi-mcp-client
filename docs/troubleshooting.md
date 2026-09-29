@@ -19,7 +19,7 @@ unavailable server isn't an empty catalog.
 
 | Code | What to check |
 | --- | --- |
-| `configuration_invalid` | JSON syntax, supported fields, transport type, and required environment variables. Run `/mcp reload` after editing. |
+| `configuration_invalid` | JSON syntax, a missing `mcpServers` object, or required environment variables. Servers with invalid fields or transport types are [skipped with a warning](configuration.md#invalid-servers) instead. Run `/mcp reload` after editing. |
 | `authentication_required` | Run `/mcp login <server>` for OAuth, or check the Authorization header. |
 | `permission_denied` | Account permissions, OAuth scopes, and service access policy. |
 | `credential_store_unavailable` | Unlock or enable the OS keyring; Linux needs a Secret Service session. |

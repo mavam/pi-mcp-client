@@ -181,11 +181,16 @@ export default function mcpClient(
     });
   }
 
+  /** Report servers that were skipped instead of loaded. The others keep working. */
+  function reportSkipped(problems: string[], ctx: ExtensionContext) {
+    if (problems.length && ctx.hasUI) ctx.ui.notify(problems.join("\n"), "warning");
+  }
+
   /** Add servers that other extensions registered; `mcp.json` entries take precedence. */
   function withRegistered(configured: Config, ctx: ExtensionContext): Config {
     const merged = withRegisteredServers(configured, pi.getMcpServers(), ctx.cwd);
     registeredNames = merged.names;
-    if (merged.problems.length && ctx.hasUI) ctx.ui.notify(merged.problems.join("\n"), "warning");
+    reportSkipped(merged.problems, ctx);
     return merged.config;
   }
 
@@ -241,8 +246,10 @@ export default function mcpClient(
     const update = mutation && await updateServerConfig(
       agentDir, ctx.cwd, trusted, mutation, validate,
     );
-    const nextConfig = withRegistered(
-      update ? update.config : await loadConfig(agentDir, ctx.cwd, trusted), ctx);
+    const skipped: string[] = [];
+    const loaded = update ? update.config : await loadConfig(agentDir, ctx.cwd, trusted, skipped);
+    reportSkipped(update ? update.problems : skipped, ctx);
+    const nextConfig = withRegistered(loaded, ctx);
     validate(nextConfig);
     const next = new McpRuntime(
       nextConfig,
@@ -288,7 +295,10 @@ export default function mcpClient(
     try {
       const trusted = projectTrusted(ctx);
       if (generation !== sessionGeneration) return;
-      config = withRegistered(await loadConfig(agentDir, ctx.cwd, trusted), ctx);
+      const skipped: string[] = [];
+      const loaded = await loadConfig(agentDir, ctx.cwd, trusted, skipped);
+      reportSkipped(skipped, ctx);
+      config = withRegistered(loaded, ctx);
       runtime = new McpRuntime(config, ctx.cwd, join(agentDir, "cache", "pi-mcp-client"), createSdkConnector(storeFactory), { interactive: ctx.hasUI });
       resourceNotifications(runtime, ctx);
     } catch (error) {
