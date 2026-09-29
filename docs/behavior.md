@@ -173,9 +173,15 @@ built-in one.
 
 Pi's built-in `codemode` and `tool_search` extensions still load. Tools loaded
 through `mcp_tools` are regular Pi tools grouped under an `mcp__<server>` namespace,
-and they carry the annotations that servers declare (`readOnlyHint`,
-`destructiveHint`, `idempotentHint`, `openWorldHint`), so permission extensions can
-confirm only calls that change something.
+with the server's `description` shown above the group. They carry the annotations
+that servers declare (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
+`openWorldHint`), so permission extensions can confirm only calls that change
+something.
+
+`codemode` scripts that call an activated tool receive the whole MCP result
+(`content`, `structuredContent`, and `isError`), while the model still receives the
+bounded text. A failed call reaches the model as an error result and scripts still
+get the result to inspect.
 
 Servers that other extensions register with `pi.registerMcpServer()` connect like
 configured servers. A server in `mcp.json` wins over a registration with the same

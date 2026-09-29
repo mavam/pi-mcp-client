@@ -592,12 +592,12 @@ test("typos fail with catalog suggestions, while partial activation succeeds", a
   expect(typo.content[0].text).toContain("example.echo");
   expect(h.activeTools()).toEqual(["mcp_tools"]);
   expect([...h.tools.keys()]).toEqual(["mcp_tools"]);
-  expect(h.hooks.get("tool_result")({ toolName: "mcp_tools", details: typo.details })).toEqual({ isError: true });
+  expect(typo.isError).toBe(true);
   const partial = await h.execute("mcp_tools", { activate: ["example.echo", "example.ech"] });
   expect(partial.details.loaded).toHaveLength(1);
   expect(partial.details.failed).toBe(false);
   expect(partial.details.rows.map((row: any) => row.state)).toEqual(["done", "failed"]);
-  expect(h.hooks.get("tool_result")({ toolName: "mcp_tools", details: partial.details })).toBeUndefined();
+  expect(partial.isError).toBeUndefined();
 });
 
 test("reads and activation share target rows and distinguish new from active tools", async () => {
@@ -1131,6 +1131,8 @@ test("native tools distinguish server-reported errors from cancelled calls", asy
   const result = await h.execute(name, {});
   expect(result.details.diagnostics[0].code).toBe("tool_error");
   expect(result.details.failed).toBe(true);
+  expect(result.isError).toBe(true);
+  expect(result.structuredContent).toMatchObject({ isError: true, content: [{ type: "text", text: "Expected failure" }] });
   expect(JSON.stringify(result.content)).toContain("Expected failure");
   h.ctx.signal = AbortSignal.abort(new Error("private-token"));
   const cancelled = await h.execute(name, {});
@@ -1320,4 +1322,17 @@ test("servers registered by other extensions are connected without being saved",
   h.notifications.length = 0;
   await h.command("disable reg");
   expect(h.notifications.join("\n")).toContain("registered by another extension");
+});
+
+test("native tools join a namespace, forward hints, and give scripts the whole result", async () => {
+  const h = await host(JSON.stringify({ mcpServers: { example: { ...fixtureServer, description: "Example\nserver" } } }));
+  const loaded = await h.execute("mcp_tools", { activate: ["example.echo"] });
+  const tool = h.tools.get(loaded.details.loaded[0].nativeName);
+  expect(tool.namespace).toEqual({ name: "mcp__example", description: "Example server" });
+  expect(tool.annotations).toEqual({ readOnlyHint: true });
+  expect(tool.outputSchema.required).toEqual(["content"]);
+  const result = await h.execute(tool.name, { text: "hello" });
+  expect(result.isError).toBeUndefined();
+  expect(result.structuredContent).toEqual({ content: [{ type: "text", text: "hello" }] });
+  expect(result.content).toEqual([{ type: "text", text: "hello" }]);
 });

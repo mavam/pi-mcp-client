@@ -10,7 +10,7 @@ server.server.setRequestHandler("resources/subscribe", async ({ params }) => {
 server.server.setRequestHandler("resources/unsubscribe", async () => ({}));
 server.registerTool(
   "echo",
-  { description: "Echo text", inputSchema: z.object({ text: z.string() }) },
+  { description: "Echo text", inputSchema: z.object({ text: z.string() }), annotations: { readOnlyHint: true, title: "ignored" } },
   async ({ text }) => ({ content: [{ type: "text", text }] }),
 );
 server.registerTool(
