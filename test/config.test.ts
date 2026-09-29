@@ -209,3 +209,28 @@ test("removed pi sections fail explicitly rather than silently losing restrictio
   await put(join(cwd, ".pi", "mcp.json"), { mcpServers: {}, pi: {} });
   await expect(loadConfig(agentDir, cwd, true)).rejects.toThrow("pi section is not supported");
 });
+
+test("invalid servers are skipped and reported without hiding the valid ones", async () => {
+  const { agentDir, cwd, put } = await fixture();
+  await put(join(agentDir, "mcp.json"), { mcpServers: {
+    good: { command: "node" },
+    badField: { command: "node", exposure: "loud", env: { KEY: "private-secret" } },
+    badOauth: { url: "https://example.com/mcp", oauth: { clientSecret: "private-secret" } },
+    _leadingUnderscore: { command: "node" },
+    primitive: "private-secret",
+  } });
+  await expect(loadConfig(agentDir, cwd, true)).rejects.toThrow();
+  const problems: string[] = [];
+  expect(Object.keys(await loadConfig(agentDir, cwd, true, problems))).toEqual(["good"]);
+  expect(problems).toHaveLength(4);
+  expect(problems.join("\n")).toContain("invalid exposure for server badField");
+  expect(problems.join("\n")).not.toContain("private-secret");
+  const update = await setServerDisabled(agentDir, cwd, false, "good", true, () => {});
+  expect(update.config.good.disabled).toBe(true);
+  expect(update.problems).toHaveLength(4);
+  const document = JSON.parse(await readFile(join(agentDir, "mcp.json"), "utf8"));
+  expect(Object.keys(document.mcpServers)).toEqual(["good", "badField", "badOauth", "_leadingUnderscore", "primitive"]);
+  // A broken file still fails as a whole.
+  await put(join(agentDir, "mcp.json"), { servers: {} });
+  await expect(loadConfig(agentDir, cwd, true, [])).rejects.toThrow("expected an mcpServers object");
+});

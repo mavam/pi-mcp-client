@@ -150,7 +150,8 @@ function parseServer(
   return config;
 }
 
-function parseConnections(value: unknown, source: string): Config {
+/** With `problems`, an invalid server is skipped and reported instead of failing the whole file. */
+function parseConnections(value: unknown, source: string, problems?: string[]): Config {
   if (!object(value) || !object(value.mcpServers)) {
     throw new Error(`${source}: expected an mcpServers object.`);
   }
@@ -158,12 +159,17 @@ function parseConnections(value: unknown, source: string): Config {
     throw new Error(`${source}: the pi section is not supported. Put server options directly in mcpServers.<server>.`);
   const result: Config = Object.create(null);
   for (const [name, entry] of Object.entries(value.mcpServers)) {
-    if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(name) || !object(entry)) {
-      throw new Error(`${source}: invalid server name or definition.`);
+    try {
+      if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(name) || !object(entry)) {
+        throw new Error(`${source}: invalid server name or definition.`);
+      }
+      result[name] = parseServer(entry, (field): never => {
+        throw new Error(`${source}: invalid ${field} for server ${name}.`);
+      });
+    } catch (error) {
+      if (!problems) throw error;
+      problems.push(`Skipped a server: ${(error as Error).message}`);
     }
-    result[name] = parseServer(entry, (field): never => {
-      throw new Error(`${source}: invalid ${field} for server ${name}.`);
-    });
   }
   return result;
 }
@@ -181,11 +187,18 @@ export function parseConfig(value: unknown, source = "MCP configuration"): Confi
   return parseConnections(value, source);
 }
 
+/** Like {@link parseConfig}, but skips invalid servers, as Pi's built-in MCP support does. */
+export function parseConfigLenient(value: unknown, source: string, problems: string[]): Config {
+  return parseConnections(value, source, problems);
+}
+
 /** Project server definitions replace global definitions in full, including options. */
 export async function loadConfig(
   agentDir: string,
   cwd: string,
   trusted: boolean,
+  /** Collects reasons for skipped servers. Without it, an invalid server fails the load. */
+  problems?: string[],
 ): Promise<Config> {
   let config: Config = Object.create(null);
   const paths = [
@@ -195,7 +208,7 @@ export async function loadConfig(
   for (const path of paths) {
     const value = await readJson(path);
     if (value === undefined) continue;
-    config = Object.assign(config, parseConfig(value, path));
+    config = Object.assign(config, parseConnections(value, path, problems));
   }
   return config;
 }
@@ -232,7 +245,7 @@ export async function inspectConfigScopes(agentDir: string, cwd: string, trusted
     throw new ConfigMutationError("Global and project configuration share a file; separate them before scoped edits.");
   const documents = await Promise.all(targets.map(readJson));
   const parsed = documents.map((document, index) => document === undefined
-    ? Object.create(null) as Config : parseConfig(document, paths[index]));
+    ? Object.create(null) as Config : parseConfigLenient(document, paths[index], []));
   return {
     global: parsed[0],
     project: parsed[1] ?? Object.create(null) as Config,
@@ -248,7 +261,7 @@ export async function updateServerConfig(
   trusted: boolean,
   mutation: ConfigMutation,
   validate: (config: Config) => void,
-): Promise<{ config: Config; scope: ConfigScope }> {
+): Promise<{ config: Config; problems: string[]; scope: ConfigScope }> {
   const scoped = mutation.action !== "toggle";
   if (scoped && mutation.scope === "project" && !trusted)
     throw new ConfigMutationError("Project configuration requires a trusted project. Use global scope, or run /trust to trust this folder first.");
@@ -257,12 +270,12 @@ export async function updateServerConfig(
   if (scoped && targets.length === 2 && targets[0] === targets[1])
     throw new ConfigMutationError("Global and project configuration share a file; separate them before scoped edits.");
   const locks = [...new Set(targets)].sort();
-  const locked = async (index: number): Promise<{ config: Config; scope: ConfigScope }> => {
+  const locked = async (index: number): Promise<{ config: Config; problems: string[]; scope: ConfigScope }> => {
     if (index < locks.length)
       return withFileMutationQueue(locks[index], () => locked(index + 1));
     const documents = await Promise.all(targets.map(readJson));
     const parsed = documents.map((document, index) => document === undefined
-      ? Object.create(null) as Config : parseConfig(document, paths[index]));
+      ? Object.create(null) as Config : parseConfigLenient(document, paths[index], []));
     if (mutation.action === "import" && mutation.expected !== fingerprint({
       targets, documents: documents.map((document) => document ?? null),
     })) throw new ConfigMutationError("MCP configuration changed since the preview. Run /mcp import again; nothing was saved.");
@@ -306,8 +319,9 @@ export async function updateServerConfig(
     // Aliases are allowed for effective-source toggles; reflect the same physical edit in both layers.
     for (const [index, target] of targets.entries())
       if (target === targets[source]) documents[index] = document;
+    const problems: string[] = [];
     const config: Config = Object.assign(Object.create(null), ...documents.map((document, index) =>
-      document === undefined ? {} : parseConfig(document, paths[index]),
+      document === undefined ? {} : parseConfigLenient(document, paths[index], problems),
     ));
     validate(config);
     if (changed) {
@@ -327,7 +341,7 @@ export async function updateServerConfig(
         await rm(temporary, { force: true });
       }
     }
-    return { config, scope: source === 0 ? "global" : "project" };
+    return { config, problems, scope: source === 0 ? "global" : "project" };
   };
   return locked(0);
 }
@@ -340,7 +354,7 @@ export function setServerDisabled(
   server: string,
   disabled: boolean,
   validate: (config: Config) => void,
-): Promise<{ config: Config; scope: ConfigScope }> {
+): Promise<{ config: Config; problems: string[]; scope: ConfigScope }> {
   return updateServerConfig(agentDir, cwd, trusted, { action: "toggle", server, disabled }, validate);
 }
 
