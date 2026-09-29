@@ -42,6 +42,31 @@ export interface ClientDetails {
   fullOutputPath?: string;
   displayBlocks?: DisplayBlock[];
 }
+/** Report failures through Pi's `isError`, which keeps `details` for the UI and scripts. */
+export function markingFailures<A extends unknown[], R extends { details?: unknown }>(
+  execute: (...args: A) => Promise<R>,
+): (...args: A) => Promise<R & { isError?: boolean }> {
+  return async (...args) => {
+    const result = await execute(...args);
+    const details = result.details;
+    return details !== null && typeof details === "object" && (details as { mcpClient?: number; failed?: boolean }).mcpClient === 1 &&
+      (details as { failed?: boolean }).failed === true
+      ? { ...result, isError: true }
+      : result;
+  };
+}
+
+/** Scripts receive the whole result. The generic shape needs no per-tool schema. */
+export const MCP_RESULT_SCHEMA = {
+  type: "object",
+  properties: {
+    content: { type: "array", items: { type: "object" } },
+    structuredContent: {},
+    isError: { type: "boolean" },
+  },
+  required: ["content"],
+} as const;
+
 export function textResult(
   text: string,
   details: ClientDetails,
