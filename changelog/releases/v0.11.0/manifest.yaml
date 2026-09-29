@@ -1,0 +1,10 @@
+created: 2026-09-29
+title: Share mcp.json with Pi's built-in MCP support
+intro: >-
+  Pi MCP Client now shares its mcp.json files and project trust with the MCP support
+  built into Pi 0.99, so one configuration works with either. Activated tools also
+  give codemode scripts the whole MCP result, and one invalid server no longer disables
+  the others.
+source:
+  mode: sync-stable-queue
+  previous_stable: v0.10.0
