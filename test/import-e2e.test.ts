@@ -45,9 +45,9 @@ enabled = false
         expect(result.config.docs.headers!.Authorization).toBe("private-fixture-token");
         expect(result.config.local.args).toEqual(["-c", `touch '${marker}'`]);
       } else {
-        expect(result.config.local).toMatchObject({ startupTimeoutMs: 1250, toolTimeoutMs: 2500 });
+        expect(result.config.local).toMatchObject({ startupTimeout: 1.25, toolTimeout: 2.5 });
         expect(result.config.local.env).toEqual({ TOKEN: `$!touch '${marker}'`, LITERAL: "$${NOT_AN_ENV_REFERENCE}" });
-        expect(result.config.disabled).toMatchObject({ disabled: true, startupTimeoutMs: 10_000, toolTimeoutMs: 60_000 });
+        expect(result.config.disabled).toMatchObject({ enabled: false, startupTimeout: 10, toolTimeout: 60 });
       }
       expect(await readFile(path, "utf8")).toBe(content);
       await expect(stat(marker)).rejects.toThrow();

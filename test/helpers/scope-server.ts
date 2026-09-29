@@ -51,5 +51,7 @@ export function scopeServer(method = "tools/call", scope = "write", options: { o
   if (options.dynamic) provider.saveClientInformation({ client_id: "original-client", issuer: base }, { issuer: base });
   provider.saveTokens({ access_token: "old", token_type: "Bearer", scope: "read", issuer: base });
   return { identity, store, requests, config: { url: identity.url, oauthClientId: identity.clientId, protocol: "legacy" as const },
+    /** The same server as an `mcp.json` entry. */
+    entry: { url: identity.url, ...(identity.clientId ? { oauth: { clientId: identity.clientId } } : {}), protocol: "legacy" as const },
     stop: () => server.stop(true) };
 }

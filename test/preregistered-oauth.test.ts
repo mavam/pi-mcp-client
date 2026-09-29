@@ -15,11 +15,12 @@ function memoryStore(): SecretStore {
 
 test("pre-registered client IDs require HTTP OAuth and never execute commands", () => {
   for (const definition of [
-    { command: "fixture", oauthClientId: "client" },
-    ...["", " ", "bad\nclient", 42, {}, "x".repeat(4097)].map((oauthClientId) => ({ url: "https://example.com", oauthClientId })),
-    { url: "https://example.com", oauthClientSecret: "not-supported" },
+    { command: "fixture", oauth: { clientId: "client" } },
+    ...["", " ", "bad\nclient", 42, {}, "x".repeat(4097)].map((clientId) => ({ url: "https://example.com", oauth: { clientId } })),
+    { url: "https://example.com", oauth: { clientSecret: "not-supported" } },
+    { url: "https://example.com", oauth: { callbackUrl: "http://localhost:8080/callback" } },
   ]) expect(() => parseConfig({ mcpServers: { example: definition } })).toThrow();
-  const config = parseConfig({ mcpServers: { example: { url: "https://example.com", oauthClientId: "!literal-client-id" } } });
+  const config = parseConfig({ mcpServers: { example: { url: "https://example.com", oauth: { clientId: "!literal-client-id" } } } });
   expect(resolveServer(config.example, "/").oauthClientId).toBe("!literal-client-id");
   process.env.MCP_TEST_CLIENT_ID = "registered-client";
   try {

@@ -5,12 +5,12 @@ import { resolve } from "node:path";
 import { parse as parseToml } from "smol-toml";
 import { adaptCodexServer, CODEX_FIELDS } from "./codex-import.js";
 import { commandWords } from "./config-commands.js";
-import { ConfigMutationError, object, parseConfig, resolveServer, type ConfigScope, type ServerConfig } from "./config.js";
+import { ConfigMutationError, object, parseConfig, resolveServer, type ConfigScope, type FileServer, type ServerConfig } from "./config.js";
 
 export const IMPORT_USAGE = "Usage: /mcp import --scope global|project <path>. Select and confirm servers interactively; no connections are opened.";
 export const MAX_IMPORT_BYTES = 1024 * 1024;
 export const MAX_IMPORT_SERVERS = 100;
-const FIELDS = new Set(["type", "command", "args", "cwd", "env", "url", "headers", "disabled", "description"]);
+const FIELDS = new Set(["type", "command", "args", "cwd", "env", "url", "headers", "enabled", "description"]);
 export const validImportName = (name: string) => /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/u.test(name);
 
 export interface ImportCandidate {
@@ -18,7 +18,10 @@ export interface ImportCandidate {
   name?: string;
   label: string;
   transport: "stdio" | "HTTP" | "unsupported";
-  definition?: ServerConfig;
+  /** The entry that is saved to `mcp.json`. */
+  definition?: FileServer;
+  /** The normalized entry, for validation and previews. */
+  config?: ServerConfig;
   problem?: string;
   escapedLiterals: boolean;
   group?: string;
@@ -101,19 +104,21 @@ export function parseImportSource(text: string): ImportSource {
       return { ...candidate, transport: "unsupported", problem: "Unsupported transport. Only stdio and Streamable HTTP can be imported; SSE is not converted." };
     try {
       const adapted = format === "codex" ? adaptCodexServer(raw) : { definition: raw, escapedLiterals: false };
-      const definition = parseConfig({ mcpServers: { imported: adapted.definition } }).imported;
+      parseConfig({ mcpServers: { imported: adapted.definition } });
       candidate.escapedLiterals = adapted.escapedLiterals;
+      const definition = structuredClone(adapted.definition) as FileServer;
       if (format === "json" && hasUnsupportedTemplate(definition))
         return { ...candidate, problem: "Unsupported variable syntax. Only ${VAR} references are supported, without defaults or client-specific variables." };
       for (const field of ["env", "headers"] as const) {
-        if (format === "codex" || !definition[field]) continue;
-        definition[field] = Object.fromEntries(Object.entries(definition[field]).map(([key, value]) => {
+        const values = definition[field];
+        if (format === "codex" || !object(values)) continue;
+        definition[field] = Object.fromEntries(Object.entries(values as Record<string, string>).map(([key, value]) => {
           const escaped = escapeSecretLiteral(value);
           if (escaped !== value) candidate.escapedLiterals = true;
           return [key, escaped];
         }));
       }
-      return { ...candidate, definition };
+      return { ...candidate, definition, config: parseConfig({ mcpServers: { imported: definition } }).imported };
     } catch {
       return { ...candidate, problem: "Invalid or unsupported server settings, literal syntax, or conflicting options. Review the source file; this entry cannot be imported." };
     }
@@ -159,14 +164,14 @@ export async function readImportSource(path: string, cwd: string, signal?: Abort
 /** Resolve for validation only. Never save resolved secrets or expose validation errors. */
 export function validateImportCandidate(candidate: ImportCandidate, cwd: string): string | undefined {
   if (candidate.problem) return candidate.problem;
-  if (!candidate.definition) return "Invalid server definition.";
-  try { resolveServer(candidate.definition, cwd); }
+  if (!candidate.config) return "Invalid server definition.";
+  try { resolveServer(candidate.config, cwd); }
   catch { return "Cannot validate this connection. Check its URL, working directory, and required environment variables in Pi."; }
   return undefined;
 }
 
 export function importPreview(candidate: ImportCandidate, problem?: string): string {
-  const definition = candidate.definition;
+  const definition = candidate.config;
   return [
     `${candidate.label} · ${candidate.transport}`,
     ...(candidate.group ? [`Source: ${candidate.group}`] : []),

@@ -22,12 +22,17 @@ test("OAuth inference honors Authorization headers", async () => {
   }
   expect(usesOAuth({ url: "https://example.com" })).toBe(true);
   for (const oauth of [true, false])
-    expect(() => parseConfig({ mcpServers: { example: { url: "https://example.com", oauth } } })).toThrow("remove oauth");
-  for (const options of [{ oauthClientId: "client" }, { oauthScopes: ["read"] }, { oauthCallbackPort: 12345 }]) {
-    const definition = { url: "https://example.com", ...options };
-    expect(parseConfig({ mcpServers: { example: definition } }).example).toEqual(definition);
-    expect(() => resolveServer({ ...definition, headers: { Authorization: "private" } }, "/")).toThrow("not both");
-    expect(() => parseConfig({ mcpServers: { example: { command: "server", ...options } } })).toThrow();
+    expect(() => parseConfig({ mcpServers: { example: { url: "https://example.com", oauth } } })).toThrow("invalid oauth");
+  const oauthCases: [object, ServerConfig][] = [
+    [{ clientId: "client" }, { oauthClientId: "client" }],
+    [{ scope: "read" }, { oauthScopes: ["read"] }],
+    [{ callbackPort: 12345 }, { oauthCallbackPort: 12345 }],
+  ];
+  for (const [oauth, options] of oauthCases) {
+    const definition = { url: "https://example.com", oauth };
+    expect(parseConfig({ mcpServers: { example: definition } }).example).toEqual({ url: "https://example.com", ...options });
+    expect(() => resolveServer({ url: "https://example.com", ...options, headers: { Authorization: "private" } }, "/")).toThrow("not both");
+    expect(() => parseConfig({ mcpServers: { example: { command: "server", oauth } } })).toThrow();
   }
 });
 

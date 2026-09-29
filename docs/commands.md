@@ -55,7 +55,7 @@ executes them.
 
 Use `/mcp tools <server>` to find out what a server can do. It fetches the current
 catalog so you can inspect tool descriptions, parameters, and required inputs.
-Browsing respects your include and exclude filters and doesn't activate tools
+Browsing respects your tool exposure filters and doesn't activate tools
 or add their schemas to the model's context. This command requires an
 interactive UI.
 
@@ -101,9 +101,9 @@ server. Using a prompt doesn't activate tools or approve their side effects. See
 
 ## Enable and disable servers
 
-Use `/mcp disable <server>` or `/mcp enable <server>` to change the `disabled`
+Use `/mcp disable <server>` or `/mcp enable <server>` to change the `enabled`
 option without editing JSON. The command reports which scope changed: the trusted
-project's `.mcp.json` if it defines the server, otherwise the global
+project's `.pi/mcp.json` if it defines the server, otherwise the global
 `~/.pi/agent/mcp.json`. Untrusted project files are neither read nor changed.
 
 Toggles preserve other values, including secret references, and reformat the file
@@ -120,7 +120,7 @@ capabilities you need.
 Both commands require an explicit `--scope global` or `--scope project`:
 
 - **Global:** `~/.pi/agent/mcp.json`.
-- **Project:** `.mcp.json` in the current
+- **Project:** `.pi/mcp.json` in the current
   [trusted project](behavior.md#project-trust). Untrusted project files are
   neither read nor changed.
 
@@ -240,7 +240,7 @@ multiline strings, quoted keys, and trailing commas follow TOML syntax.
 
 **Claude/Cursor JSON:** Read a top-level `mcpServers` object and, for Claude,
 `projects.<path>.mcpServers` groups. Supported server fields are `type`, `command`,
-`args`, `cwd`, `env`, `url`, `headers`, `disabled`, and `description`.
+`args`, `cwd`, `env`, `url`, `headers`, `enabled`, and `description`.
 `${VAR}` references are preserved and must resolve in Pi before import. Default
 expressions and client-specific variables such as `${env:TOKEN}` or
 `${workspaceFolder}` are refused rather than translated. In environment and
@@ -252,15 +252,15 @@ them so they don't become Pi variable expansions or secret commands.
 | Codex setting | Imported setting |
 | --- | --- |
 | `command`, `args`, `cwd`, `url` | Copied without resolving values. Literal `${...}` in these fields is refused because Pi would interpolate it. |
-| `enabled` | Inverted to `disabled`. |
+| `enabled` | Copied. |
 | `env`, `http_headers` | Literal environment/header values, including literal `${VAR}`, `$VAR`, and `!`. |
 | `env_vars`, `env_http_headers`, `bearer_token_env_var` | Unresolved environment references, not copies of their current values. Overlapping entries are refused. |
-| `startup_timeout_sec` or `startup_timeout_ms` | `startupTimeoutMs`, defaulting to Codex's 10 seconds. Both source options together are refused. |
-| `tool_timeout_sec` | `toolTimeoutMs`, defaulting to Codex's 60 seconds. |
-| `enabled_tools`, `disabled_tools` | `includeTools`, `excludeTools`. Names containing `*` are refused rather than converted into wildcard patterns. |
-| `scopes` | `oauthScopes`. |
+| `startup_timeout_sec` or `startup_timeout_ms` | `startupTimeout` in seconds, defaulting to Codex's 10 seconds. Both source options together are refused. |
+| `tool_timeout_sec` | `toolTimeout` in seconds, defaulting to Codex's 60 seconds. |
+| `enabled_tools`, `disabled_tools` | `exposure: "hidden"` with `toolExposure` entries that reveal the enabled tools, and `toolExposure` entries that hide the disabled ones. Names containing `*` are refused rather than converted into wildcard patterns. |
+| `scopes` | `oauth.scope`, joined by spaces. |
 
-Timeouts must fit Pi's 100–600000 ms range. Startup and tool deadlines stay
+Timeouts must fit the 0.1–600 second range. Startup and tool deadlines stay
 separate; they don't replace the timeout for metadata or resource requests.
 Only local execution is supported. `required = true`, remote environment
 placement, remote `env_vars` entries, and per-server/tool approval policies are

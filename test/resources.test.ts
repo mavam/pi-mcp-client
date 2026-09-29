@@ -259,7 +259,7 @@ test("partial discovery retains tools when resource listing fails and vice versa
   expect(result.unavailable[0]).toContain("resources:");
   expect(JSON.stringify(result)).not.toContain("private-server-payload");
   list.mockRestore();
-  f.runtime.config.example.includeTools = []; // New runtime for the changed identity.
+  f.runtime.config.example.exposure = "hidden"; // New runtime for the changed identity.
   const other = new McpRuntime(f.runtime.config, f.directory, join(f.directory, "other"), f.connect);
   cleanup.push(() => other.close());
   const resourceOnly = await other.discover(undefined, undefined, "all");

@@ -14,7 +14,7 @@ async function fixture() {
   directories.push(root);
   const agentDir = join(root, "agent");
   const cwd = join(root, "project");
-  await mkdir(cwd);
+  await mkdir(join(cwd, ".pi"), { recursive: true });
   const validate = (config: Config) => {
     for (const definition of Object.values(config)) if (!definition.disabled) resolveServer(definition, cwd);
   };
@@ -34,7 +34,7 @@ test("configuration command parsing preserves quoted argv without shell expansio
     .toEqual({ action: "add", scope: "global", server: "docs", replace: true,
       definition: { url: "https://example.com/mcp", headers: { Authorization: "Bearer ${TOKEN}" } } });
   expect(parseConfigCommand("add --scope global --oauth-client-id client docs https://example.com"))
-    .toMatchObject({ definition: { oauthClientId: "client" } });
+    .toMatchObject({ definition: { oauth: { clientId: "client" } } });
   expect(parseConfigCommand("remove --scope project docs")).toEqual({ action: "remove", scope: "project", server: "docs" });
   expect(parseConfigCommand("get docs")).toBeUndefined();
 });
@@ -95,10 +95,10 @@ test("scoped edits preserve other scopes and removing overrides reveals global d
   const f = await fixture();
   await f.run("add --scope global docs https://global.example");
   await f.run("add --scope project --replace docs https://project.example");
-  const project = await readFile(join(f.cwd, ".mcp.json"), "utf8");
+  const project = await readFile(join(f.cwd, ".pi", "mcp.json"), "utf8");
   const hidden = await f.run("add --scope global --replace docs https://replacement.example");
   expect(hidden.config.docs.url).toBe("https://project.example");
-  expect(await readFile(join(f.cwd, ".mcp.json"), "utf8")).toBe(project);
+  expect(await readFile(join(f.cwd, ".pi", "mcp.json"), "utf8")).toBe(project);
   const revealed = await f.run("remove --scope project docs");
   expect(revealed.config.docs.url).toBe("https://replacement.example");
   await expect(f.run("remove --scope project docs")).rejects.toThrow("selected scope");
@@ -109,7 +109,7 @@ test("scoped edits preserve other scopes and removing overrides reveals global d
 
 test("untrusted project edits are rejected without reading or changing project configuration", async () => {
   const f = await fixture();
-  const path = join(f.cwd, ".mcp.json");
+  const path = join(f.cwd, ".pi", "mcp.json");
   await writeFile(path, "invalid-private-project-json");
   await expect(f.run("add --scope project docs https://example.com", false)).rejects.toThrow("trusted project");
   await expect(f.run("remove --scope project docs", false)).rejects.toThrow("trusted project");
@@ -122,7 +122,7 @@ test("edits preserve metadata, unresolved secret commands, symlinks, and existin
   const f = await fixture();
   await mkdir(f.agentDir);
   const target = join(f.agentDir, "actual.json");
-  const existing = { type: "stdio", command: "node", env: { KEY: "!secret-command" }, disabled: true };
+  const existing = { type: "stdio", command: "node", env: { KEY: "!secret-command" }, enabled: false };
   await writeFile(target, JSON.stringify({ metadata: "preserved", mcpServers: { existing } }));
   await chmod(target, 0o640);
   await symlink(target, join(f.agentDir, "mcp.json"));
@@ -197,7 +197,7 @@ test("scoped edits refuse ambiguous and dangling symlinks", async () => {
   const f = await fixture();
   await f.run("add --scope global docs -- node");
   const global = join(f.agentDir, "mcp.json");
-  const project = join(f.cwd, ".mcp.json");
+  const project = join(f.cwd, ".pi", "mcp.json");
   await symlink(global, project);
   const before = await readFile(global, "utf8");
   await expect(f.run("remove --scope global docs")).rejects.toThrow("share a file");

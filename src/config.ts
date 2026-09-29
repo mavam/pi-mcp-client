@@ -5,6 +5,9 @@ import { homedir } from "node:os";
 import { createHash, randomUUID } from "node:crypto";
 import { secretTemplate } from "./secrets.js";
 
+export type Exposure = "codemode" | "codemode-deferred" | "deferred" | "direct" | "hidden";
+const EXPOSURES: readonly string[] = ["codemode", "codemode-deferred", "deferred", "direct", "hidden"];
+
 export interface ClientOptions {
   description?: string;
   oauthClientId?: string;
@@ -12,15 +15,20 @@ export interface ClientOptions {
   oauthCallbackPort?: number;
   oauthDpop?: boolean;
   disabled?: boolean;
-  includeTools?: string[];
-  excludeTools?: string[];
+  /** Only `hidden` changes behavior here: tools are always discovered, then activated. */
+  exposure?: Exposure;
+  toolExposure?: Record<string, Exposure>;
   timeoutMs?: number;
   startupTimeoutMs?: number;
   toolTimeoutMs?: number;
   protocol?: "legacy" | "auto";
 }
 
-/** Normalized runtime configuration; explicit transport tags are validated, then inferred. */
+/**
+ * Normalized runtime configuration, derived from a server entry in `mcp.json`. The file shape
+ * follows Pi's built-in MCP support (`enabled`, `exposure`, `toolExposure`, `timeout`, `oauth`),
+ * so one file works with either extension; explicit transport tags are validated, then inferred.
+ */
 export interface ServerConfig extends ClientOptions {
   command?: string;
   args?: string[];
@@ -30,72 +38,116 @@ export interface ServerConfig extends ClientOptions {
   headers?: Record<string, string>;
 }
 export type Config = Record<string, ServerConfig>;
+/** A server entry as written to `mcp.json`. */
+export type FileServer = Record<string, unknown>;
 
 export function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-const OPTION_FIELDS = [
-  "description",
-  "oauthClientId",
-  "oauthScopes",
-  "oauthCallbackPort",
-  "oauthDpop",
-  "disabled",
-  "includeTools",
-  "excludeTools",
-  "timeoutMs",
-  "startupTimeoutMs",
-  "toolTimeoutMs",
-  "protocol",
-] as const;
+const FIELDS = new Set([
+  "type", "command", "args", "cwd", "env", "url", "headers",
+  "description", "enabled", "exposure", "toolExposure", "timeout",
+  "startupTimeout", "toolTimeout", "oauth", "protocol",
+]);
+const OAUTH_FIELDS = new Set(["clientId", "scope", "callbackPort", "dpop"]);
 
-function validateOptions(
+/** Seconds in the file, milliseconds at runtime. */
+function seconds(value: unknown, field: string, fail: (field: string) => never): number | undefined {
+  if (value === undefined) return undefined;
+  const ms = typeof value === "number" ? Math.round(value * 1000) : NaN;
+  if (!Number.isInteger(ms) || ms < 100 || ms > 600_000) fail(`${field} (0.1–600 seconds)`);
+  return ms;
+}
+
+function parseServer(
   entry: Record<string, unknown>,
   fail: (field: string) => never,
-): void {
+): ServerConfig {
+  for (const key of Object.keys(entry)) if (!FIELDS.has(key)) fail(key);
   if (
     entry.description !== undefined &&
     (typeof entry.description !== "string" || !entry.description)
   )
     fail("description");
-  for (const key of ["includeTools", "excludeTools"]) {
-    if (
-      entry[key] !== undefined &&
-      (!Array.isArray(entry[key]) ||
-        !entry[key].every((x: unknown) => typeof x === "string"))
-    )
-      fail(key);
-  }
-  if (entry.oauthClientId !== undefined &&
-      (typeof entry.oauthClientId !== "string" ||
-        !entry.oauthClientId.trim() || entry.oauthClientId.length > 4096 ||
-        /[\u0000-\u001f\u007f]/u.test(entry.oauthClientId)))
-    fail("oauthClientId (requires OAuth and a nonempty client ID)");
-  if (entry.oauthScopes !== undefined &&
-      (!Array.isArray(entry.oauthScopes) ||
-        entry.oauthScopes.length === 0 || entry.oauthScopes.length > 100 ||
-        !entry.oauthScopes.every((scope: unknown) => typeof scope === "string" &&
-          scope.length <= 256 && /^[\x21\x23-\x5b\x5d-\x7e]+$/u.test(scope)) ||
-        new Set(entry.oauthScopes).size !== entry.oauthScopes.length))
-    fail("oauthScopes (requires OAuth and 1–100 unique OAuth scope tokens)");
-  if (entry.oauthCallbackPort !== undefined &&
-      (!Number.isInteger(entry.oauthCallbackPort) ||
-        Number(entry.oauthCallbackPort) < 1 || Number(entry.oauthCallbackPort) > 65535))
-    fail("oauthCallbackPort (requires OAuth and a port from 1–65535)");
-  if (entry.oauthDpop !== undefined && typeof entry.oauthDpop !== "boolean") fail("oauthDpop (requires a boolean)");
-  if (entry.disabled !== undefined && typeof entry.disabled !== "boolean") fail("disabled");
-  for (const field of ["timeoutMs", "startupTimeoutMs", "toolTimeoutMs"]) {
-    if (entry[field] !== undefined &&
-        (!Number.isInteger(entry[field]) || Number(entry[field]) < 100 || Number(entry[field]) > 600_000))
-      fail(`${field} (100–600000)`);
-  }
+  if (entry.enabled !== undefined && typeof entry.enabled !== "boolean") fail("enabled");
+  if (entry.exposure !== undefined && !EXPOSURES.includes(entry.exposure as string)) fail("exposure");
+  if (entry.toolExposure !== undefined &&
+      (!object(entry.toolExposure) || !Object.values(entry.toolExposure).every((mode) => EXPOSURES.includes(mode as string))))
+    fail("toolExposure");
   if (
     entry.protocol !== undefined &&
     entry.protocol !== "legacy" &&
     entry.protocol !== "auto"
   )
     fail("protocol");
+  if (entry.type !== undefined && entry.type !== "stdio" && entry.type !== "http" && entry.type !== "streamable-http")
+    fail("type (supported transports: stdio, http; SSE is not supported)");
+  for (const key of ["command", "cwd", "url"]) {
+    if (entry[key] !== undefined && (typeof entry[key] !== "string" || !entry[key]))
+      fail(key);
+  }
+  if (entry.args !== undefined &&
+      (!Array.isArray(entry.args) || !entry.args.every((x: unknown) => typeof x === "string")))
+    fail("args");
+  for (const key of ["env", "headers"]) {
+    if (
+      entry[key] !== undefined &&
+      (!object(entry[key]) ||
+        !Object.values(entry[key]).every((x) => typeof x === "string"))
+    )
+      fail(key);
+  }
+  if (Boolean(entry.command) === Boolean(entry.url))
+    fail("transport (provide exactly one of command or url)");
+  if (
+    (entry.type === "stdio" && !entry.command) ||
+    ((entry.type === "http" || entry.type === "streamable-http") && !entry.url)
+  )
+    fail("type (must match command or url)");
+  if (entry.command && (entry.headers || entry.oauth !== undefined))
+    fail("HTTP options on stdio transport");
+  if (entry.url && (entry.args || entry.cwd || entry.env))
+    fail("stdio options on HTTP transport");
+  const config: ServerConfig = {};
+  for (const key of ["command", "args", "cwd", "env", "url", "headers", "description", "protocol", "exposure", "toolExposure"] as const)
+    if (entry[key] !== undefined) (config as Record<string, unknown>)[key] = structuredClone(entry[key]);
+  if (entry.enabled === false) config.disabled = true;
+  const timeoutMs = seconds(entry.timeout, "timeout", fail);
+  if (timeoutMs !== undefined) config.timeoutMs = timeoutMs;
+  const startupTimeoutMs = seconds(entry.startupTimeout, "startupTimeout", fail);
+  if (startupTimeoutMs !== undefined) config.startupTimeoutMs = startupTimeoutMs;
+  const toolTimeoutMs = seconds(entry.toolTimeout, "toolTimeout", fail);
+  if (toolTimeoutMs !== undefined) config.toolTimeoutMs = toolTimeoutMs;
+  if (entry.oauth !== undefined) {
+    const oauth = entry.oauth;
+    if (!object(oauth)) return fail("oauth");
+    if (oauth.clientSecret !== undefined || oauth.callbackUrl !== undefined)
+      fail("oauth (clientSecret and callbackUrl are not supported; this extension supports public clients on loopback port callbacks)");
+    for (const key of Object.keys(oauth)) if (!OAUTH_FIELDS.has(key)) fail(`oauth.${key}`);
+    if (oauth.clientId !== undefined &&
+        (typeof oauth.clientId !== "string" ||
+          !oauth.clientId.trim() || oauth.clientId.length > 4096 ||
+          /[\u0000-\u001f\u007f]/u.test(oauth.clientId)))
+      fail("oauth.clientId (requires a nonempty client ID)");
+    if (oauth.scope !== undefined) {
+      const scopes = typeof oauth.scope === "string" ? oauth.scope.split(" ").filter(Boolean) : [];
+      if (scopes.length === 0 || scopes.length > 100 ||
+          !scopes.every((scope) => scope.length <= 256 && /^[\x21\x23-\x5b\x5d-\x7e]+$/u.test(scope)) ||
+          new Set(scopes).size !== scopes.length)
+        fail("oauth.scope (requires 1–100 unique space-separated OAuth scope tokens)");
+      config.oauthScopes = scopes;
+    }
+    if (oauth.callbackPort !== undefined &&
+        (!Number.isInteger(oauth.callbackPort) ||
+          Number(oauth.callbackPort) < 1 || Number(oauth.callbackPort) > 65535))
+      fail("oauth.callbackPort (a port from 1–65535)");
+    if (oauth.dpop !== undefined && typeof oauth.dpop !== "boolean") fail("oauth.dpop (requires a boolean)");
+    if (oauth.clientId !== undefined) config.oauthClientId = oauth.clientId as string;
+    if (oauth.callbackPort !== undefined) config.oauthCallbackPort = oauth.callbackPort as number;
+    if (oauth.dpop !== undefined) config.oauthDpop = oauth.dpop as boolean;
+  }
+  return config;
 }
 
 function parseConnections(value: unknown, source: string): Config {
@@ -105,62 +157,13 @@ function parseConnections(value: unknown, source: string): Config {
   if (Object.hasOwn(value, "pi"))
     throw new Error(`${source}: the pi section is not supported. Put server options directly in mcpServers.<server>.`);
   const result: Config = Object.create(null);
-  const fields = new Set([
-    "type",
-    "command",
-    "args",
-    "cwd",
-    "env",
-    "url",
-    "headers",
-    ...OPTION_FIELDS,
-  ]);
   for (const [name, entry] of Object.entries(value.mcpServers)) {
     if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(name) || !object(entry)) {
       throw new Error(`${source}: invalid server name or definition.`);
     }
-    const fail = (field: string): never => {
+    result[name] = parseServer(entry, (field): never => {
       throw new Error(`${source}: invalid ${field} for server ${name}.`);
-    };
-    if (Object.hasOwn(entry, "oauth"))
-      throw new Error(`${source}: remove oauth from server ${name}; HTTP authentication is automatic.`);
-    for (const key of Object.keys(entry)) if (!fields.has(key)) fail(key);
-    validateOptions(entry, fail);
-    if (entry.type !== undefined && entry.type !== "stdio" && entry.type !== "http")
-      fail("type (supported transports: stdio, http; SSE is not supported)");
-    for (const key of ["command", "cwd", "url"]) {
-      if (entry[key] !== undefined && (typeof entry[key] !== "string" || !entry[key]))
-        fail(key);
-    }
-    for (const key of ["args"]) {
-      if (
-        entry[key] !== undefined &&
-        (!Array.isArray(entry[key]) ||
-          !entry[key].every((x: unknown) => typeof x === "string"))
-      )
-        fail(key);
-    }
-    for (const key of ["env", "headers"]) {
-      if (
-        entry[key] !== undefined &&
-        (!object(entry[key]) ||
-          !Object.values(entry[key]).every((x) => typeof x === "string"))
-      )
-        fail(key);
-    }
-    if (Boolean(entry.command) === Boolean(entry.url))
-      fail("transport (provide exactly one of command or url)");
-    if (
-      (entry.type === "stdio" && !entry.command) ||
-      (entry.type === "http" && !entry.url)
-    )
-      fail("type (must match command or url)");
-    if (entry.command && (entry.headers || entry.oauthClientId !== undefined || entry.oauthScopes !== undefined || entry.oauthCallbackPort !== undefined || entry.oauthDpop !== undefined))
-      fail("HTTP options on stdio transport");
-    if (entry.url && (entry.args || entry.cwd || entry.env))
-      fail("stdio options on HTTP transport");
-    const { type: _type, ...normalized } = entry;
-    result[name] = structuredClone(normalized) as unknown as ServerConfig;
+    });
   }
   return result;
 }
@@ -187,7 +190,7 @@ export async function loadConfig(
   let config: Config = Object.create(null);
   const paths = [
     join(agentDir, "mcp.json"),
-    ...(trusted ? [join(cwd, ".mcp.json")] : []),
+    ...(trusted ? [join(cwd, ".pi", "mcp.json")] : []),
   ];
   for (const path of paths) {
     const value = await readJson(path);
@@ -200,9 +203,9 @@ export async function loadConfig(
 export type ConfigScope = "global" | "project";
 export type ConfigMutation =
   | { action: "toggle"; server: string; disabled: boolean }
-  | { action: "add"; server: string; scope: ConfigScope; definition: ServerConfig; replace: boolean }
+  | { action: "add"; server: string; scope: ConfigScope; definition: FileServer; replace: boolean }
   | { action: "remove"; server: string; scope: ConfigScope }
-  | { action: "import"; scope: ConfigScope; servers: Config; expected: string; sourcePath: string };
+  | { action: "import"; scope: ConfigScope; servers: Record<string, FileServer>; expected: string; sourcePath: string };
 
 /** Messages from this class are safe to show without including raw configuration. */
 export class ConfigMutationError extends Error {}
@@ -223,7 +226,7 @@ async function configTarget(path: string): Promise<string> {
 
 /** Read both authorized scopes for an import preview; never resolve connection values. */
 export async function inspectConfigScopes(agentDir: string, cwd: string, trusted: boolean) {
-  const paths = [join(agentDir, "mcp.json"), ...(trusted ? [join(cwd, ".mcp.json")] : [])];
+  const paths = [join(agentDir, "mcp.json"), ...(trusted ? [join(cwd, ".pi", "mcp.json")] : [])];
   const targets = await Promise.all(paths.map(configTarget));
   if (targets.length === 2 && targets[0] === targets[1])
     throw new ConfigMutationError("Global and project configuration share a file; separate them before scoped edits.");
@@ -249,7 +252,7 @@ export async function updateServerConfig(
   const scoped = mutation.action !== "toggle";
   if (scoped && mutation.scope === "project" && !trusted)
     throw new ConfigMutationError("Project configuration requires a trusted project. Use global scope, or run /trust to trust this folder first.");
-  const paths = [join(agentDir, "mcp.json"), ...(trusted ? [join(cwd, ".mcp.json")] : [])];
+  const paths = [join(agentDir, "mcp.json"), ...(trusted ? [join(cwd, ".pi", "mcp.json")] : [])];
   const targets = await Promise.all(paths.map(configTarget));
   if (scoped && targets.length === 2 && targets[0] === targets[1])
     throw new ConfigMutationError("Global and project configuration share a file; separate them before scoped edits.");
@@ -269,7 +272,7 @@ export async function updateServerConfig(
       for (const [index, config] of parsed.entries()) if (Object.hasOwn(config, server)) source = index;
       if (source < 0) throw new ConfigMutationError("Server is no longer configured. Run /mcp reload.");
     }
-    const document = (documents[source] ?? { mcpServers: {} }) as { mcpServers: Record<string, ServerConfig> };
+    const document = (documents[source] ?? { mcpServers: {} }) as { mcpServers: Record<string, FileServer> };
     let changed = true;
     if (mutation.action === "import") {
       if (targets[source] === mutation.sourcePath)
@@ -279,7 +282,7 @@ export async function updateServerConfig(
       for (const [name, definition] of Object.entries(imported)) {
         // Check every imported definition, including disabled and shadowed entries.
         resolveServer(definition, cwd);
-        document.mcpServers[name] = structuredClone(definition);
+        document.mcpServers[name] = structuredClone(mutation.servers[name]);
       }
     } else if (mutation.action === "add") {
       // Validate even a new definition shadowed by another scope. Never resolve secrets by executing them.
@@ -293,8 +296,12 @@ export async function updateServerConfig(
         throw new ConfigMutationError("Server is not defined in the selected scope. No configuration was changed.");
       delete document.mcpServers[server];
     } else {
-      changed = Boolean(document.mcpServers[server].disabled) !== mutation.disabled;
-      if (changed) document.mcpServers[server].disabled = mutation.disabled;
+      const entry = document.mcpServers[server] as FileServer;
+      changed = (entry.enabled === false) !== mutation.disabled;
+      if (changed) {
+        if (mutation.disabled) entry.enabled = false;
+        else delete entry.enabled;
+      }
     }
     // Aliases are allowed for effective-source toggles; reflect the same physical edit in both layers.
     for (const [index, target] of targets.entries())
@@ -415,14 +422,20 @@ export function fingerprint(value: unknown): string {
     .digest("hex");
 }
 
-export function matches(name: string, pattern: string): boolean {
+function matches(name: string, pattern: string): boolean {
   const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replaceAll("*", ".*");
   return new RegExp(`^${escaped}$`, "u").test(name);
 }
+
+/** Exposure of one tool: an exact `toolExposure` key, else the first matching pattern, else the server's. */
+export function toolExposure(name: string, config: ServerConfig): Exposure {
+  const overrides = config.toolExposure ?? {};
+  if (Object.hasOwn(overrides, name)) return overrides[name];
+  for (const [pattern, mode] of Object.entries(overrides))
+    if (pattern.includes("*") && matches(name, pattern)) return mode;
+  return config.exposure ?? "codemode";
+}
+
 export function allowed(name: string, config: ServerConfig): boolean {
-  return (
-    !config.disabled &&
-    (!config.includeTools || config.includeTools.some((p) => matches(name, p))) &&
-    !config.excludeTools?.some((p) => matches(name, p))
-  );
+  return !config.disabled && toolExposure(name, config) !== "hidden";
 }

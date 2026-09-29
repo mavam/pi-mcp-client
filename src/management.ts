@@ -159,6 +159,16 @@ export async function authenticationSummary(
   }
 }
 
+/** Hidden tools, or the only visible ones when the server itself is hidden. */
+function toolFilterLines(config: ServerConfig): string[] {
+  const overrides = Object.entries(config.toolExposure ?? {});
+  const names = (visible: boolean) =>
+    overrides.filter(([, mode]) => (mode !== "hidden") === visible).map(([name]) => line(name)).join(", ") || "none";
+  return config.exposure === "hidden"
+    ? [`Visible tools: ${names(true)} (all others hidden)`]
+    : [`Hidden tools: ${names(false)}`];
+}
+
 /** Never render connection values: credentials can occur in URLs, args, or commands. */
 export function inspectServer(
   name: string,
@@ -191,7 +201,6 @@ export function inspectServer(
           "URL: hidden",
           `Headers: ${Object.keys(config.headers ?? {}).length} (names and values hidden)`,
         ]),
-    `Include tools: ${config.includeTools ? config.includeTools.map(line).join(", ") : "all"}`,
-    `Exclude tools: ${config.excludeTools?.map(line).join(", ") || "none"}`,
+    ...toolFilterLines(config),
   ].join("\n");
 }

@@ -1,41 +1,11 @@
 import type { RegisteredMcpServer } from "@earendil-works/pi-coding-agent";
-import { object, parseConfig, resolveServer, type Config, type ServerConfig } from "./config.js";
+import { parseConfig, resolveServer, type Config } from "./config.js";
 
 /**
- * Translate a server that an extension registered with `pi.registerMcpServer()` into this
- * extension's configuration. Pi's `exposure` modes describe how the built-in extension reaches
- * tools; this extension always discovers, then activates, so only `hidden` has an equivalent.
- */
-function translate(config: RegisteredMcpServer["config"]): unknown {
-  const { exposure, toolExposure, enabled, timeout, oauth, type: _type, ...entry } =
-    config as typeof config & { oauth?: unknown };
-  const result: Record<string, unknown> = { ...entry };
-  if (enabled === false) result.disabled = true;
-  if (typeof timeout === "number") result.timeoutMs = Math.round(timeout * 1000);
-  if (oauth !== undefined) {
-    if (!object(oauth)) throw new Error("invalid oauth");
-    if (oauth.clientSecret !== undefined || oauth.callbackUrl !== undefined)
-      throw new Error("oauth.clientSecret and oauth.callbackUrl are not supported");
-    if (oauth.clientId !== undefined) result.oauthClientId = oauth.clientId;
-    if (typeof oauth.scope === "string") result.oauthScopes = oauth.scope.split(/\s+/).filter(Boolean);
-    if (oauth.callbackPort !== undefined) result.oauthCallbackPort = oauth.callbackPort;
-  }
-  const overrides = Object.entries(toolExposure ?? {});
-  if (exposure === "hidden") {
-    const visible = overrides.filter(([, mode]) => mode !== "hidden").map(([name]) => name);
-    if (visible.length) result.includeTools = visible;
-    else result.disabled = true;
-  } else {
-    const hidden = overrides.filter(([, mode]) => mode === "hidden").map(([name]) => name);
-    if (hidden.length) result.excludeTools = hidden;
-  }
-  return result;
-}
-
-/**
- * Add extension-registered servers to `configured`. A server from `mcp.json` wins over a
- * registration of the same name, as it does in Pi's built-in MCP support. Invalid registrations
- * are skipped and reported in `problems`.
+ * Add servers that extensions registered with `pi.registerMcpServer()` to `configured`. They use
+ * the `mcp.json` entry shape, so they go through the same validation. A server from `mcp.json`
+ * wins over a registration of the same name, as it does in Pi's built-in MCP support. Invalid
+ * registrations are skipped and reported in `problems`.
  */
 export function withRegisteredServers(
   configured: Config,
@@ -47,16 +17,12 @@ export function withRegisteredServers(
   for (const server of registered) {
     if (Object.hasOwn(configured, server.name)) continue;
     try {
-      const parsed: ServerConfig | undefined = parseConfig(
-        { mcpServers: { [server.name]: translate(server.config) } },
-        `Registered MCP server ${server.name}`,
-      )[server.name];
-      if (!parsed) throw new Error("invalid definition");
+      const parsed = parseConfig({ mcpServers: { [server.name]: server.config } })[server.name];
       if (!parsed.disabled) resolveServer(parsed, cwd);
       extra[server.name] = parsed;
     } catch (error) {
-      const reason = error instanceof Error ? error.message : "invalid definition";
-      problems.push(`Registered MCP server ${server.name} was skipped: ${reason.replace(/^Registered MCP server \S+: /, "")}`);
+      const reason = error instanceof Error ? error.message.replace(/^MCP configuration: /, "") : "invalid definition";
+      problems.push(`Registered MCP server ${server.name} was skipped: ${reason}`);
     }
   }
   return {

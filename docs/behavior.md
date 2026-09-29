@@ -57,7 +57,7 @@ During a tool call, a server can ask you for information or send you to a web
 page. Pi shows each request in a dialog that names the requesting server. The
 model never sees or answers these dialogs, and the tool call waits until you
 respond. Time spent answering doesn't count against the
-[tool timeout](configuration.md#pi-specific-options).
+[tool timeout](configuration.md#options).
 
 Form requests list the requested fields with their current values, including
 server defaults. Select a field to change it; Pi validates each value against
@@ -163,6 +163,14 @@ this extension registers `/mcp`, Pi doesn't load the built-in one, prints a
 one-time warning, and leaves `mcp.json` handling to this extension. To silence the
 warning, disable `mcp` under Built-in in `pi config`.
 
+Both extensions read the same files, `~/.pi/agent/mcp.json` and `.pi/mcp.json`, in
+the same shape, so you can switch between them without editing your servers. Pi's
+`exposure` modes describe how the built-in extension reaches tools; this extension
+always discovers and then activates, so only `hidden` applies. See
+[configuration](configuration.md#files-and-transports). Options that only this
+extension knows, such as `description` and `oauth.dpop`, are ignored by the
+built-in one.
+
 Pi's built-in `codemode` and `tool_search` extensions still load. Tools loaded
 through `mcp_tools` are regular Pi tools grouped under an `mcp__<server>` namespace,
 and they carry the annotations that servers declare (`readOnlyHint`,
@@ -172,9 +180,7 @@ confirm only calls that change something.
 Servers that other extensions register with `pi.registerMcpServer()` connect like
 configured servers. A server in `mcp.json` wins over a registration with the same
 name. Registrations are never saved, so `/mcp enable`, `/mcp disable`, and
-`/mcp remove` don't change them. Of Pi's `exposure` modes, only `hidden` (and
-`toolExposure` entries marked `hidden`) applies: this extension always discovers
-and then activates. Invalid registrations, and registrations that use
+`/mcp remove` don't change them. Invalid registrations, and registrations that use
 `oauth.clientSecret` or `oauth.callbackUrl`, are skipped with a warning.
 
 ## Trust and permissions
@@ -182,7 +188,7 @@ and then activates. Invalid registrations, and registrations that use
 Only load configuration you trust. Server executables and secret commands run
 with your user permissions; trusted project configuration can replace global
 connections and settings. See [project trust](#project-trust) for when a
-project's `.mcp.json` loads.
+project's `.pi/mcp.json` loads.
 
 Configuration imports require an explicit file, scope, selection, and final
 confirmation. Import previews hide connection values; review the source file
@@ -197,7 +203,7 @@ extensions for additional controls. Cancelling a call doesn't guarantee that the
 server rolled back its effects. The extension doesn't retry failed tool
 invocations; verify an interrupted operation's outcome before trying again.
 
-`includeTools` and `excludeTools` apply only to tools, not resources or prompts. Keeping
+`exposure: "hidden"` and `toolExposure` apply only to tools, not resources or prompts. Keeping
 `mcp_tools` available permits resource reads from enabled servers, subject to the
 server's authorization. `kind: "tools"` filters one search; it isn't an access
 restriction. Disable a server to prevent all access, or exclude `mcp_tools` through
@@ -208,25 +214,13 @@ model-facing tool allowlist; disable the server to prevent prompt access.
 
 ## Project trust
 
-A project's `.mcp.json` can start local commands, so it loads only after an
-explicit trust decision for the folder. Pi asks for trust only in folders with Pi
-project resources, such as `.pi/settings.json` or `.agents/skills`, and trusts
-other folders implicitly. The extension doesn't rely on that implicit trust:
+A project's `.pi/mcp.json` can start local commands, so it loads only in a project
+that Pi trusts. Pi treats `.pi/mcp.json` like other project resources, such as
+`.pi/settings.json` and `.pi/extensions`: it asks once, remembers the answer, and
+honors `--approve`, `--no-approve`, and its `defaultProjectTrust` setting. This
+extension follows Pi's decision and doesn't ask on its own. Use Pi's `/trust`
+command to save or change a decision, then run `/mcp reload`; MCP servers don't
+require a restart.
 
-- **Folders with Pi project resources:** Pi's decision applies, including
-  `--approve` and session-only trust.
-- **Other folders:** a saved decision for the folder or a parent folder applies.
-  Without one, Pi's `defaultProjectTrust` setting applies: `always` loads project
-  servers and `never` ignores them. With the default `ask`, interactive sessions
-  ask when a `.mcp.json` exists, and headless sessions ignore the file.
-- **Untrusted folders:** `--no-approve` or a refusal in Pi always ignores project
-  servers.
-
-Saved answers go to Pi's project trust store, so they also apply to Pi project
-resources. Use Pi's `/trust` command to save or change a decision, then run
-`/mcp reload`; MCP servers don't require a restart. In folders without Pi project
-resources, `--approve` doesn't trust `.mcp.json`; save a decision instead.
-
-Only session start and `/mcp reload` ask. Other configuration commands, such as
-`/mcp add` and `/mcp import`, use the current decision. Untrusted project files
-are neither read nor changed.
+Configuration commands, such as `/mcp add` and `/mcp import`, use the current
+decision. Untrusted project files are neither read nor changed.

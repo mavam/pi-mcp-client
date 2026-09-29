@@ -20,7 +20,7 @@ describe("configuration", () => {
       { command: "bun", url: "https://example.com" },
       { command: "bun", oauth: true },
       { url: "https://example.com", env: {} },
-      { command: "bun", timeoutMs: 0 },
+      { command: "bun", timeout: 0 },
       { command: "bun", unknown: true },
     ])
       expect(() => parseConfig({ mcpServers: { local: entry } })).toThrow();
@@ -51,14 +51,16 @@ describe("configuration", () => {
       "/tmp/relative",
     );
   });
-  test("include and exclude filters fail closed", () => {
-    expect(
-      allowed("get_issue", { includeTools: ["get_*"], excludeTools: ["*_secret"] }),
-    ).toBe(true);
-    expect(
-      allowed("get_secret", { includeTools: ["get_*"], excludeTools: ["*_secret"] }),
-    ).toBe(false);
-    expect(allowed("get_issue", { includeTools: [] })).toBe(false);
+  test("tool exposure filters follow Pi's precedence", () => {
+    const allowlist = { exposure: "hidden" as const, toolExposure: { "get_*": "codemode" as const, get_secret: "hidden" as const } };
+    expect(allowed("get_issue", allowlist)).toBe(true);
+    expect(allowed("get_secret", allowlist)).toBe(false);
+    expect(allowed("list_issues", allowlist)).toBe(false);
+    const denylist = { toolExposure: { "delete_*": "hidden" as const, delete_draft: "direct" as const } };
+    expect(allowed("delete_issue", denylist)).toBe(false);
+    expect(allowed("delete_draft", denylist)).toBe(true);
+    expect(allowed("get_issue", denylist)).toBe(true);
+    expect(allowed("get_issue", { exposure: "hidden" })).toBe(false);
     expect(allowed("get_issue", { disabled: true })).toBe(false);
   });
 });

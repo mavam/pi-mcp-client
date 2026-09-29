@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import { join } from "node:path";
 import {
   BorderedLoader,
@@ -32,7 +31,6 @@ import { Exposure, restoredTools, TOOLS_TOOL } from "./exposure.js";
 import { convertResult, convertResourceResult, textResult, type ClientDetails } from "./output.js";
 import { renderCall, renderResult } from "./render.js";
 import { STATUS_ENTRY, statusPanel, type StatusSnapshot } from "./status-panel.js";
-import { askProjectTrust, projectTrustDecision } from "./trust.js";
 import { chooseOption } from "./prompt-selector.js";
 import type { ElicitationUI } from "./elicitation.js";
 import {
@@ -83,8 +81,6 @@ export default function mcpClient(
   let loginController: AbortController | undefined;
   let promptController: AbortController | undefined;
   let importController: AbortController | undefined;
-  let trustController: AbortController | undefined;
-  let sessionTrust: { cwd: string; trusted: boolean } | undefined;
   /** Servers other extensions registered with `pi.registerMcpServer()`. They are never saved. */
   let registeredNames = new Set<string>();
   pi.registerEntryRenderer<StatusSnapshot>(STATUS_ENTRY, (entry, _options, theme) =>
@@ -187,36 +183,8 @@ export default function mcpClient(
     return merged.config;
   }
 
-  const trustDecision = (ctx: ExtensionContext) =>
-    projectTrustDecision(agentDir, ctx.cwd, ctx.isProjectTrusted()) ??
-    (sessionTrust?.cwd === ctx.cwd ? sessionTrust.trusted : undefined);
-  const projectTrusted = (ctx: ExtensionContext) => trustDecision(ctx) ?? false;
-
-  /** Ask only when project servers exist and nothing is decided; explain ignored files. */
-  async function resolveProjectTrust(ctx: ExtensionContext): Promise<boolean> {
-    let trusted = trustDecision(ctx);
-    if (!existsSync(join(ctx.cwd, ".mcp.json"))) return trusted ?? false;
-    let answered = false;
-    if (trusted === undefined && ctx.hasUI) {
-      const controller = new AbortController();
-      trustController = controller;
-      try {
-        trusted = await askProjectTrust(agentDir, ctx.cwd, ctx.ui.select.bind(ctx.ui),
-          AbortSignal.any([controller.signal, ...(ctx.signal ? [ctx.signal] : [])]));
-      } finally {
-        if (trustController === controller) trustController = undefined;
-      }
-      if (controller.signal.aborted) return false;
-      if (trusted !== undefined) {
-        sessionTrust = { cwd: ctx.cwd, trusted };
-        answered = true;
-      }
-    }
-    // Pi reports its own refusals, and --no-approve is explicit.
-    if (!trusted && !answered && ctx.hasUI && ctx.isProjectTrusted())
-      ctx.ui.notify("Project .mcp.json ignored: this folder isn't trusted for MCP servers. Run /trust to save a decision, then /mcp reload.", "warning");
-    return trusted ?? false;
-  }
+  /** Pi asks for trust itself when `.pi/mcp.json` exists, and remembers the answer. */
+  const projectTrusted = (ctx: ExtensionContext) => ctx.isProjectTrusted();
 
   const restore = (ctx: ExtensionContext) => {
     const tools = restoredTools(ctx.sessionManager.getBranch()).filter((tool) => {
@@ -263,7 +231,7 @@ export default function mcpClient(
     };
     ctx.signal?.throwIfAborted();
     // Only explicit reloads ask; edits and imports use the current decision.
-    const trusted = mutation ? projectTrusted(ctx) : await resolveProjectTrust(ctx);
+    const trusted = projectTrusted(ctx);
     const update = mutation && await updateServerConfig(
       agentDir, ctx.cwd, trusted, mutation, validate,
     );
@@ -307,13 +275,12 @@ export default function mcpClient(
     loginController?.abort();
     promptController?.abort();
     importController?.abort();
-    trustController?.abort();
     await runtime?.close();
     runtime = undefined;
     config = {};
     configError = undefined;
     try {
-      const trusted = await resolveProjectTrust(ctx);
+      const trusted = projectTrusted(ctx);
       if (generation !== sessionGeneration) return;
       config = withRegistered(await loadConfig(agentDir, ctx.cwd, trusted), ctx);
       runtime = new McpRuntime(config, ctx.cwd, join(agentDir, "cache", "pi-mcp-client"), createSdkConnector(storeFactory), { interactive: ctx.hasUI });
@@ -342,7 +309,6 @@ export default function mcpClient(
     loginController?.abort();
     promptController?.abort();
     importController?.abort();
-    trustController?.abort();
     const old = runtime;
     runtime = undefined;
     await old?.close();

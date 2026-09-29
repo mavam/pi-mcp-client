@@ -114,7 +114,7 @@ method `none`. Then configure its client ID:
   "mcpServers": {
     "example": {
       "url": "https://mcp.example.com/mcp",
-      "oauthClientId": "${EXAMPLE_OAUTH_CLIENT_ID}"
+      "oauth": { "clientId": "${EXAMPLE_OAUTH_CLIENT_ID}" }
     }
   }
 }
@@ -135,7 +135,7 @@ configuration before logging out and logging in again to trust the replacement.
 
 [Slack doesn't support dynamic client registration](https://docs.slack.dev/ai/slack-mcp-server/).
 Without a registered client, login fails before opening a browser. Configure
-`oauthClientId` with your Slack app's client ID, and ensure the app supports
+`oauth.clientId` with your Slack app's client ID, and ensure the app supports
 public-client PKCE. Apps requiring a client secret aren't supported by this
 extension. Slack also requires an eligible internal or Marketplace-published
 app and any workspace administrator approval required by your workspace.
@@ -148,7 +148,7 @@ Register the exact callback URL shown by `/mcp get slack` in the app settings
   "mcpServers": {
     "slack": {
       "url": "https://mcp.slack.com/mcp",
-      "oauthClientId": "${SLACK_OAUTH_CLIENT_ID}"
+      "oauth": { "clientId": "${SLACK_OAUTH_CLIENT_ID}" }
     }
   }
 }
@@ -169,8 +169,7 @@ Configure scopes and a callback port in the server definition:
   "mcpServers": {
     "example": {
       "url": "https://mcp.example.com/mcp",
-      "oauthScopes": ["read", "write"],
-      "oauthCallbackPort": 19848
+      "oauth": { "scope": "read write", "callbackPort": 19848 }
     }
   }
 }
@@ -188,8 +187,8 @@ hosts and paths aren't supported. If the port is occupied, choose another port o
 use manual login.
 
 Scopes are case-sensitive OAuth tokens, each up to 256 characters, without spaces,
-quotes, or backslashes. Omit `oauthScopes` to retain SDK/server-driven selection;
-an empty array is rejected. The SDK may also request `offline_access` when the
+quotes, or backslashes. Separate several scopes with spaces. Omit `oauth.scope` to retain SDK/server-driven selection;
+an empty value is rejected. The SDK may also request `offline_access` when the
 service advertises refresh-token support. Requested scopes aren't a guarantee of
 granted permissions or a per-tool permission policy.
 
@@ -211,7 +210,7 @@ ES256 proofs:
   "mcpServers": {
     "example": {
       "url": "https://mcp.example.com/mcp",
-      "oauthDpop": true
+      "oauth": { "dpop": true }
     }
   }
 }
@@ -263,7 +262,7 @@ an active login. After signing in, explicitly retry the operation; sign-in never
 replays it. Successful grants retain their requested scopes even when the service
 omits the optional scope field from its token response. If previously granted
 scopes are unknown, the review warns that they might not be retained. Configure
-`oauthScopes` with the permissions you need rather than relying on unspecified
+`oauth.scope` with the permissions you need rather than relying on unspecified
 service defaults. After review, the sign-in dialog shows a scope count instead
 of repeating the full list.
 
@@ -271,7 +270,7 @@ Scope names are untrusted service data, not instructions. Requests are bounded t
 100 scope names and kept only in this Pi session for ten minutes. Reloading
 configuration, ending the session, or logging out discards them. Login uses the
 configured server's OAuth discovery, not URLs supplied in a scope challenge.
-Invalid or missing scope names require checking `oauthScopes` against the service's
+Invalid or missing scope names require checking `oauth.scope` against the service's
 requirements instead. Headless operation reports the challenge but cannot approve
 additional permissions.
 

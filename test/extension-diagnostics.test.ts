@@ -1,9 +1,9 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { ProjectTrustStore, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import extension from "../src/index.js";
 import { restoredTools } from "../src/exposure.js";
 import { prepareTool } from "../src/catalog.js";
@@ -20,6 +20,7 @@ afterEach(async () => {
 async function host(configuration: string, excluded: string[] = [], credentialStore?: CredentialStoreFactory) {
   const directory = await mkdtemp(join(tmpdir(), "mcp-diags-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
+  await mkdir(join(directory, ".pi"), { recursive: true });
   await writeFile(join(directory, "mcp.json"), configuration);
   const tools = new Map<string, any>();
   const hooks = new Map<string, any>();
@@ -84,10 +85,9 @@ async function host(configuration: string, excluded: string[] = [], credentialSt
     entries,
     entryRenderers,
     command: (args: string) => commands.get("mcp").handler(args, ctx),
-    /** Pi trusts bare folders implicitly; project servers also need a saved decision. */
+    /** Pi decides project trust itself when `.pi/mcp.json` exists. */
     trust: (trusted = true) => {
       ctx.isProjectTrusted = () => trusted;
-      if (trusted) new ProjectTrustStore(directory).set(directory, true);
     },
   };
 }
@@ -97,7 +97,7 @@ for (const outcome of ["approve", "decline", "headless", "reload", "reload-input
     const callbacks: { onToken?: () => Promise<void> } = {};
     const fixture = scopeServer("tools/call", "write", callbacks);
     cleanup.push(async () => { await fixture.stop(); });
-    const h = await host(JSON.stringify({ mcpServers: { example: fixture.config } }), [], async () => fixture.store);
+    const h = await host(JSON.stringify({ mcpServers: { example: fixture.entry } }), [], async () => fixture.store);
     await h.execute("mcp_tools", { activate: ["example.write"] });
     const failed = await h.execute("mcp__example__write", {});
     expect(JSON.stringify(failed)).toContain("oauth_scope_required");
@@ -287,7 +287,7 @@ test("a session switch while add waits for idle prevents mutation", async () => 
 test("removing a disabled OAuth server never accesses its credentials", async () => {
   let credentials = 0;
   const h = await host(JSON.stringify({ mcpServers: {
-    private: { url: "https://example.com/mcp", disabled: true },
+    private: { url: "https://example.com/mcp", enabled: false },
   } }), [], async () => { credentials++; throw new Error("must not access credentials"); });
   await h.command("remove --scope global private");
   expect(h.notifications.at(-1)).toContain("Credentials were retained");
@@ -312,7 +312,7 @@ test("logout accepts disabled servers, preserves configuration, and explains ext
   const store = { read: () => record, write: (value: string) => { record = value; }, remove: () => { record = null; } };
   const configuration = JSON.stringify({ mcpServers: {
     example: { url: "https://oauth.example/mcp" },
-    alias: { url: "https://oauth.example/mcp", disabled: true },
+    alias: { url: "https://oauth.example/mcp", enabled: false },
     external: { url: "https://external.example/mcp", headers: { Authorization: "!never-execute" } },
   } });
   const h = await host(configuration, [], async () => store);
@@ -361,8 +361,8 @@ test("get and logout isolate names sharing a URL and configured client ID", asyn
     stores.set(server, store);
   }
   const h = await host(JSON.stringify({ mcpServers: {
-    first: { url, oauthClientId: "shared-client", disabled: true },
-    second: { url, oauthClientId: "shared-client" },
+    first: { url, oauth: { clientId: "shared-client" }, enabled: false },
+    second: { url, oauth: { clientId: "shared-client" } },
   } }), [], async (identity) => {
     expect(identity.url).toBe(url);
     expect(identity.clientId).toBe("shared-client");
@@ -393,13 +393,13 @@ test("logout reports store failures without claiming success or exposing raw err
 test("login refuses header authentication, disabled servers, and headless use without changing configuration", async () => {
   for (const definition of [
     { url: "https://example.com/mcp", headers: { aUtHoRiZaTiOn: "!never-execute" } },
-    { url: "https://example.com/mcp", disabled: true },
+    { url: "https://example.com/mcp", enabled: false },
     { url: "https://example.com/mcp" },
-  ]) {
+  ] as { url: string; headers?: object; enabled?: boolean }[]) {
     let accesses = 0;
     const configuration = JSON.stringify({ mcpServers: { example: definition } });
     const h = await host(configuration, [], async () => { accesses++; throw new Error("unexpected access"); });
-    if (!definition.headers && !definition.disabled) {
+    if (!definition.headers && definition.enabled !== false) {
       h.ctx.hasUI = false;
       await expect(h.command("login example")).rejects.toThrow("interactive session");
     } else {
@@ -421,13 +421,13 @@ test("login uses the effective definition without writing global or project file
       accessed.push(identity.url);
       throw new Error("fixture: stop before network access");
     });
-    await writeFile(join(h.directory, ".mcp.json"), project);
+    await writeFile(join(h.directory, ".pi", "mcp.json"), project);
     h.trust(trusted);
     await h.command("reload");
     await h.command("login example");
     expect(accessed).toEqual([trusted ? "https://project.example/mcp" : "https://global.example/mcp"]);
     expect(await readFile(join(h.directory, "mcp.json"), "utf8")).toBe(global);
-    expect(await readFile(join(h.directory, ".mcp.json"), "utf8")).toBe(project);
+    expect(await readFile(join(h.directory, ".pi", "mcp.json"), "utf8")).toBe(project);
   }
 });
 
@@ -469,7 +469,7 @@ for (const configured of [true, false]) for (const outcome of ["success", "cance
     } });
     base = `http://127.0.0.1:${server.port}`;
     cleanup.push(async () => { await server.stop(true); });
-    const h = await host(JSON.stringify({ mcpServers: { example: { url: `${base}/mcp`, ...(configured ? { oauthClientId: "public", oauthScopes: ["read"], oauthCallbackPort: 19848 } : {}) } } }), [], async () => ({
+    const h = await host(JSON.stringify({ mcpServers: { example: { url: `${base}/mcp`, ...(configured ? { oauth: { clientId: "public", scope: "read", callbackPort: 19848 } } : {}) } } }), [], async () => ({
       read: () => record, write: (value) => { record = value; }, remove: () => { record = null; },
     }));
     const reconnect = spyOn(McpRuntime.prototype, "reconnect").mockResolvedValue(undefined);
@@ -547,7 +547,7 @@ test("discovery, including exact names, never registers, activates, or restores 
 test("unknown and disabled discovery servers fail without connecting or activating", async () => {
   const h = await host(JSON.stringify({ mcpServers: {
     example: fixtureServer,
-    offline: { ...fixtureServer, disabled: true },
+    offline: { ...fixtureServer, enabled: false },
   } }));
   const catalog = spyOn(McpRuntime.prototype, "catalog");
   try {
@@ -724,7 +724,7 @@ test("resource reads that finish after reload do not attach stale content", asyn
 test("activation reports restrictions, collisions, and unavailable servers separately", async () => {
   const h = await host(JSON.stringify({ mcpServers: {
     example: fixtureServer,
-    offline: { ...fixtureServer, disabled: true },
+    offline: { ...fixtureServer, enabled: false },
   } }), ["mcp__example__echo"]);
   h.tools.set("mcp__example__fail", { name: "mcp__example__fail" });
   const result = await h.execute("mcp_tools", { activate: ["example.echo", "example.fail", "offline.echo"] });
@@ -774,7 +774,7 @@ test("get includes disabled servers and never resolves or exposes connection sec
           args: ["secret-arg"],
           cwd: "secret-dir",
           env: { SECRET: "!touch should-not-exist" },
-          disabled: true,
+          enabled: false,
         },
         remote: {
           url: "https://example.com/secret-path?token=secret-query",
@@ -803,7 +803,7 @@ test("command completion suggests actions first and servers only after an action
   const h = await host(JSON.stringify({ mcpServers: {
     linear: fixtureServer,
     cloudflare: fixtureServer,
-    disabled: { ...fixtureServer, disabled: true },
+    disabled: { ...fixtureServer, enabled: false },
   } }));
   const complete = h.commands.get("mcp").getArgumentCompletions;
   expect(complete("")).toEqual(
@@ -869,7 +869,7 @@ test("enable and disable persist, reconcile tools, and keep discovery lazy", asy
   expect(loaded).toHaveLength(1);
   expect(JSON.stringify((await h.execute(loaded[0].nativeName, { text: "back" })).content)).toContain("back");
   const document = JSON.parse(await readFile(join(h.directory, "mcp.json"), "utf8"));
-  expect(document.mcpServers.example.disabled).toBe(false);
+  expect(document.mcpServers.example.enabled).toBeUndefined();
   expect(document.mcpServers.other).toEqual(fixtureServer);
 });
 
@@ -888,7 +888,7 @@ test("toggles wait for idle and reject malformed commands without writes", async
   expect(await readFile(path, "utf8")).toBe(before);
   release();
   await disabling;
-  expect(JSON.parse(await readFile(path, "utf8")).mcpServers.example.disabled).toBe(true);
+  expect(JSON.parse(await readFile(path, "utf8")).mcpServers.example.enabled).toBe(false);
 });
 
 test("a session change while waiting for idle cancels a toggle", async () => {
@@ -908,7 +908,7 @@ test("a session change while waiting for idle cancels a toggle", async () => {
 test("failed enabling preserves disk and runtime without revealing secrets", async () => {
   const h = await host(JSON.stringify({ mcpServers: {
     example: fixtureServer,
-    invalid: { url: "https://user:private-token@example.com", disabled: true },
+    invalid: { url: "https://user:private-token@example.com", enabled: false },
   } }));
   const echo = (await h.execute("mcp_tools", { activate: ["example.echo"] })).details.loaded[0].nativeName;
   const before = await readFile(join(h.directory, "mcp.json"), "utf8");
@@ -940,7 +940,7 @@ test("tool browsing lists filtered tools without activating any", async () => {
     join(h.directory, "mcp.json"),
     JSON.stringify({
       mcpServers: {
-        example: { ...fixtureServer, excludeTools: ["fail"] },
+        example: { ...fixtureServer, toolExposure: { fail: "hidden" } },
       },
     }),
   );
@@ -981,8 +981,8 @@ for (const change of ["changed", "disabled", "removed"])
                 example: {
                   ...fixtureServer,
                   ...(change === "disabled"
-                    ? { disabled: true }
-                    : { excludeTools: ["echo"] }),
+                    ? { enabled: false }
+                    : { toolExposure: { echo: "hidden" } }),
                 },
               },
       }),
@@ -1022,8 +1022,8 @@ test("reload recovers from startup errors and respects project trust", async () 
     JSON.stringify({ mcpServers: { example: fixtureServer } }),
   );
   await writeFile(
-    join(h.directory, ".mcp.json"),
-    JSON.stringify({ mcpServers: { example: { ...fixtureServer, disabled: true } } }),
+    join(h.directory, ".pi", "mcp.json"),
+    JSON.stringify({ mcpServers: { example: { ...fixtureServer, enabled: false } } }),
   );
   await h.command("reload");
   expect(
@@ -1041,7 +1041,7 @@ test("empty tool catalogs, picker cancellation, and headless browsing don't acti
   await h.command("tools example"); // The picker returns undefined.
   expect(h.activeTools()).toEqual(["mcp_tools"]);
   await writeFile(join(h.directory, "mcp.json"), JSON.stringify({ mcpServers: {
-    example: { ...fixtureServer, includeTools: [] },
+    example: { ...fixtureServer, exposure: "hidden" },
   } }));
   await h.command("reload");
   await h.command("tools example");

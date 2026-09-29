@@ -40,22 +40,29 @@ export function adaptCodexServer(raw: Record<string, unknown>) {
   }
   if (raw.enabled !== undefined) {
     if (typeof raw.enabled !== "boolean") return invalid();
-    definition.disabled = !raw.enabled;
+    definition.enabled = raw.enabled;
   }
   if (raw.required !== undefined && raw.required !== false) return invalid();
   if (raw.experimental_environment !== undefined && raw.experimental_environment !== "local") return invalid();
-  for (const [from, to] of [["enabled_tools", "includeTools"], ["disabled_tools", "excludeTools"]] as const) {
+  const toolExposure: Record<string, string> = Object.create(null);
+  for (const [from, mode] of [["enabled_tools", "codemode"], ["disabled_tools", "hidden"]] as const) {
     if (raw[from] === undefined) continue;
     const values = raw[from];
     // Codex filters exact names. A literal * must not become a Pi wildcard.
     if (!Array.isArray(values) || !values.every((item) => typeof item === "string" && !item.includes("*"))) return invalid();
-    definition[to] = values;
+    // An allowlist hides everything else; a denylist entry wins over an allowlist entry.
+    if (from === "enabled_tools") definition.exposure = "hidden";
+    for (const value of values) toolExposure[value] = mode;
   }
-  if (raw.scopes !== undefined) definition.oauthScopes = raw.scopes;
+  if (Object.keys(toolExposure).length) definition.toolExposure = toolExposure;
+  if (raw.scopes !== undefined) {
+    if (!Array.isArray(raw.scopes) || !raw.scopes.every((scope) => typeof scope === "string" && scope && !/\s/u.test(scope))) return invalid();
+    definition.oauth = { scope: raw.scopes.join(" ") };
+  }
   if (raw.startup_timeout_sec !== undefined && raw.startup_timeout_ms !== undefined) return invalid();
-  definition.startupTimeoutMs = raw.startup_timeout_ms !== undefined
-    ? milliseconds(raw.startup_timeout_ms, 1) : milliseconds(raw.startup_timeout_sec ?? 10, 1000);
-  definition.toolTimeoutMs = milliseconds(raw.tool_timeout_sec ?? 60, 1000);
+  definition.startupTimeout = (raw.startup_timeout_ms !== undefined
+    ? milliseconds(raw.startup_timeout_ms, 1) : milliseconds(raw.startup_timeout_sec ?? 10, 1000)) / 1000;
+  definition.toolTimeout = milliseconds(raw.tool_timeout_sec ?? 60, 1000) / 1000;
 
   if (raw.env !== undefined || raw.env_vars !== undefined) {
     const env: Record<string, string> = Object.create(null);
