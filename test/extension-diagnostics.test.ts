@@ -29,6 +29,7 @@ async function host(configuration: string, excluded: string[] = [], credentialSt
   const entries: { customType: string; data: any }[] = [];
   const entryRenderers = new Map<string, any>();
   let active = ["mcp_tools"];
+  const registered: any[] = [];
   extension(
     {
       registerTool: (tool: any) => tools.set(tool.name, tool),
@@ -39,6 +40,7 @@ async function host(configuration: string, excluded: string[] = [], credentialSt
       sendMessage: (message: any, options: any) => messages.push({ message, options }),
       on: (name: string, fn: any) => hooks.set(name, fn),
       getActiveTools: () => active,
+      getMcpServers: () => registered,
       getAllTools: () => [...tools.values()],
       setActiveTools: (names: string[]) => {
         active = names.filter((name) => !excluded.includes(name));
@@ -68,6 +70,7 @@ async function host(configuration: string, excluded: string[] = [], credentialSt
   return {
     ctx,
     directory,
+    registered,
     activeTools: () => active,
     setActiveTools: (names: string[]) => {
       active = names;
@@ -1298,4 +1301,23 @@ test("tree navigation while reviewing a prompt discards the pending selection", 
   expect(get).toHaveBeenCalledTimes(1);
   expect(h.messages).toEqual([]);
   expect(h.notifications.at(-1)).toContain("cancelled");
+});
+
+test("servers registered by other extensions are connected without being saved", async () => {
+  const h = await host(JSON.stringify({ mcpServers: { local: { command: "echo" } } }));
+  h.registered.push(
+    { name: "reg", extensionPath: "ext", config: { command: "echo", exposure: "codemode", timeout: 5 } },
+    { name: "local", extensionPath: "ext", config: { command: "shadowed" } },
+    { name: "bad", extensionPath: "ext", config: { url: "https://example.com/mcp", oauth: { clientSecret: "x" } } },
+  );
+  await h.hooks.get("mcp_servers_change")({ type: "mcp_servers_change", servers: h.registered }, h.ctx);
+  await h.command("");
+  const status = h.notifications.join("\n");
+  expect(status).toContain("reg");
+  expect(status).toContain("local");
+  expect(h.notifications.some((text) => text.includes("Registered MCP server bad was skipped"))).toBe(true);
+  expect(await readFile(join(h.directory, "mcp.json"), "utf8")).not.toContain("reg");
+  h.notifications.length = 0;
+  await h.command("disable reg");
+  expect(h.notifications.join("\n")).toContain("registered by another extension");
 });

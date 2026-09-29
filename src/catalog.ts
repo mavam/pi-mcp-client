@@ -4,12 +4,31 @@ import { Compile } from "typebox/compile";
 import type { TSchema } from "typebox";
 import { fingerprint, object } from "./config.js";
 
+/** The MCP tool annotation hints Pi forwards to permission extensions. */
+export interface ToolHints {
+  readOnlyHint?: boolean;
+  destructiveHint?: boolean;
+  idempotentHint?: boolean;
+  openWorldHint?: boolean;
+}
+
+const HINTS = ["readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"] as const;
+
+/** Keep only boolean hints; everything else a server sends is untrusted noise. */
+export function toolHints(value: unknown): ToolHints | undefined {
+  if (!object(value)) return;
+  const hints: ToolHints = {};
+  for (const key of HINTS) if (typeof value[key] === "boolean") hints[key] = value[key];
+  return Object.keys(hints).length ? hints : undefined;
+}
+
 export interface CatalogTool {
   server: string;
   name: string;
   nativeName: string;
   description: string;
   inputSchema: TSchema;
+  annotations?: ToolHints;
   identity: string;
   schemaHash: string;
 }
@@ -38,7 +57,7 @@ export function nativeName(server: string, name: string): string {
 export function prepareTool(
   server: string,
   identity: string,
-  tool: { name: string; description?: string; inputSchema: unknown },
+  tool: { name: string; description?: string; inputSchema: unknown; annotations?: unknown },
 ): CatalogTool {
   if (
     !tool.name ||
@@ -53,6 +72,7 @@ export function prepareTool(
     throw new Error("Tool schema exceeds 64 KiB.");
   const inputSchema = JSON.parse(json) as TSchema;
   Compile(inputSchema);
+  const annotations = toolHints(tool.annotations);
   return {
     server,
     name: tool.name,
@@ -60,6 +80,7 @@ export function prepareTool(
     identity,
     description: plain(tool.description ?? "No description supplied.").slice(0, 8000),
     inputSchema,
+    ...(annotations && { annotations }),
     schemaHash: fingerprint(inputSchema),
   };
 }

@@ -156,6 +156,27 @@ limits also stay plain text. Resource-link MIME types describe the linked conten
 not the displayed link label. Supported images use the existing result display;
 see [large results](troubleshooting.md#large-results) for size limits.
 
+## Pi's built-in MCP support
+
+Pi 0.99 and later ship their own MCP support as the `builtin:mcp` extension. Because
+this extension registers `/mcp`, Pi doesn't load the built-in one, prints a
+one-time warning, and leaves `mcp.json` handling to this extension. To silence the
+warning, disable `mcp` under Built-in in `pi config`.
+
+Pi's built-in `codemode` and `tool_search` extensions still load. Tools loaded
+through `mcp_tools` are regular Pi tools grouped under an `mcp__<server>` namespace,
+and they carry the annotations that servers declare (`readOnlyHint`,
+`destructiveHint`, `idempotentHint`, `openWorldHint`), so permission extensions can
+confirm only calls that change something.
+
+Servers that other extensions register with `pi.registerMcpServer()` connect like
+configured servers. A server in `mcp.json` wins over a registration with the same
+name. Registrations are never saved, so `/mcp enable`, `/mcp disable`, and
+`/mcp remove` don't change them. Of Pi's `exposure` modes, only `hidden` (and
+`toolExposure` entries marked `hidden`) applies: this extension always discovers
+and then activates. Invalid registrations, and registrations that use
+`oauth.clientSecret` or `oauth.callbackUrl`, are skipped with a warning.
+
 ## Trust and permissions
 
 Only load configuration you trust. Server executables and secret commands run

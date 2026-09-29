@@ -33,6 +33,7 @@ export function restoredTools(entries: SessionEntry[]): CatalogTool[] {
           name: raw.name,
           description: raw.description,
           inputSchema: raw.inputSchema as CatalogTool["inputSchema"],
+          annotations: raw.annotations,
         });
         tools.set(tool.nativeName, tool);
       } catch {
