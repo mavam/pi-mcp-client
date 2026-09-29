@@ -43,9 +43,9 @@ permissions. Tool activation isn't a per-call approval prompt. See
 ## ⚙️ Configuration
 
 Store server definitions in `~/.pi/agent/mcp.json` or a trusted project's
-`.mcp.json`. Project servers load only after an explicit
-[trust decision](docs/behavior.md#project-trust). Project definitions replace
-same-named global definitions in full.
+`.pi/mcp.json`, the same files and shape as Pi's built-in MCP support. Project
+servers load only in a project that Pi [trusts](docs/behavior.md#project-trust).
+Project definitions replace same-named global definitions in full.
 You can edit these files or use `/mcp add` and `/mcp remove`. To reuse a
 Claude/Cursor JSON or Codex TOML file, run `/mcp import --scope global <path>` and
 review the selected connections before saving.

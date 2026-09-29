@@ -25,12 +25,12 @@ second line'''
   expect(result.ignoredTopLevel).toBe(1);
   expect(result.candidates[0].name).toBe("node-repl");
   expect(result.candidates[0].definition).toEqual({
-    command: "node", args: ["server.js"], cwd: "/workspace", disabled: true,
-    startupTimeoutMs: 1001, toolTimeoutMs: 90_000, env: { TEXT: "first line\nsecond line" },
+    command: "node", args: ["server.js"], cwd: "/workspace", enabled: false,
+    startupTimeout: 1.001, toolTimeout: 90, env: { TEXT: "first line\nsecond line" },
   });
   expect(importPreview(result.candidates[0])).toContain("Startup timeout: 1001 ms; tool timeout: 90000 ms");
-  expect(codex({ command: "node", startup_timeout_ms: 2000 }).definition).toMatchObject({ startupTimeoutMs: 2000, toolTimeoutMs: 60_000 });
-  expect(codex({ command: "node" }).definition).toMatchObject({ startupTimeoutMs: 10_000, toolTimeoutMs: 60_000 });
+  expect(codex({ command: "node", startup_timeout_ms: 2000 }).definition).toMatchObject({ startupTimeout: 2, toolTimeout: 60 });
+  expect(codex({ command: "node" }).definition).toMatchObject({ startupTimeout: 10, toolTimeout: 60 });
 });
 
 test("Codex literal values and explicit environment references remain distinct", () => {
@@ -55,8 +55,8 @@ test("Codex literal values and explicit environment references remain distinct",
 
 test("Codex exact tool filters, disabled state, and OAuth scopes are preserved", () => {
   const entry = codex({ url: "https://example.com", enabled: true, enabled_tools: ["get", "post"], disabled_tools: ["post"], scopes: ["read"], required: false, experimental_environment: "local" });
-  expect(entry.definition).toMatchObject({ disabled: false, includeTools: ["get", "post"], excludeTools: ["post"], oauthScopes: ["read"] });
-  expect(codex({ command: "node", enabled_tools: [] }).definition!.includeTools).toEqual([]);
+  expect(entry.definition).toMatchObject({ enabled: true, exposure: "hidden", toolExposure: { get: "codemode", post: "hidden" }, oauth: { scope: "read" } });
+  expect(codex({ command: "node", enabled_tools: [] }).definition!.exposure).toBe("hidden");
 });
 
 test("Codex refuses lossy or conflicting conversions rather than dropping restrictions", () => {
@@ -115,10 +115,10 @@ test("Claude project-local server groups remain separate and bounded", () => {
 });
 
 test("startup and tool timeout options use the same bounded millisecond validation", () => {
-  for (const field of ["startupTimeoutMs", "toolTimeoutMs"]) {
-    for (const value of [0, 99, 600_001, Infinity, 100.1, "1000", null])
+  for (const field of ["startupTimeout", "toolTimeout"]) {
+    for (const value of [0, 0.099, 600.001, Infinity, "1", null])
       expect(() => parseConfig({ mcpServers: { example: { command: "node", [field]: value } } })).toThrow();
-    for (const value of [100, 600_000])
-      expect(parseConfig({ mcpServers: { example: { command: "node", [field]: value } } }).example).toHaveProperty(field, value);
+    for (const value of [0.1, 600])
+      expect(parseConfig({ mcpServers: { example: { command: "node", [field]: value } } }).example).toHaveProperty(`${field}Ms`, value * 1000);
   }
 });

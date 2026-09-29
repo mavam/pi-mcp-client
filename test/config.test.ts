@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { fingerprint, loadConfig, parseConfig, setServerDisabled } from "../src/config.js";
+import { fingerprint, loadConfig, parseConfig, setServerDisabled, type ServerConfig } from "../src/config.js";
 
 const directories: string[] = [];
 afterEach(async () => {
@@ -17,33 +17,33 @@ async function fixture() {
   const agentDir = join(directory, "agent");
   const cwd = join(directory, "project");
   await mkdir(agentDir);
-  await mkdir(cwd);
+  await mkdir(join(cwd, ".pi"), { recursive: true });
   const put = (path: string, value: unknown) => writeFile(path, JSON.stringify(value));
   return { agentDir, cwd, put };
 }
 
 test("toggles modify only the effective source and preserve unresolved values", async () => {
   const { agentDir, cwd, put } = await fixture();
-  const global = { mcpServers: { docs: { command: "global", disabled: true }, other: { command: "other" } } };
+  const global = { mcpServers: { docs: { command: "global", enabled: false }, other: { command: "other" } } };
   const project = { metadata: "preserved", mcpServers: {
     docs: { type: "stdio", command: "${MISSING_COMMAND}", env: { KEY: "!secret-command" } },
   } };
   await put(join(agentDir, "mcp.json"), global);
-  await put(join(cwd, ".mcp.json"), project);
+  await put(join(cwd, ".pi", "mcp.json"), project);
   const update = await setServerDisabled(agentDir, cwd, true, "docs", true, () => {});
   expect(update.scope).toBe("project");
   expect(update.config.docs.disabled).toBe(true);
   expect(JSON.parse(await readFile(join(agentDir, "mcp.json"), "utf8"))).toEqual(global);
-  expect(JSON.parse(await readFile(join(cwd, ".mcp.json"), "utf8"))).toEqual({
-    ...project, mcpServers: { docs: { ...project.mcpServers.docs, disabled: true } },
+  expect(JSON.parse(await readFile(join(cwd, ".pi", "mcp.json"), "utf8"))).toEqual({
+    ...project, mcpServers: { docs: { ...project.mcpServers.docs, enabled: false } },
   });
   const fallback = await setServerDisabled(agentDir, cwd, true, "other", true, () => {});
   expect(fallback.scope).toBe("global");
   expect((await loadConfig(agentDir, cwd, true)).other.disabled).toBe(true);
   // Untrusted project files must not even be parsed.
-  await writeFile(join(cwd, ".mcp.json"), "invalid secret JSON");
+  await writeFile(join(cwd, ".pi", "mcp.json"), "invalid secret JSON");
   expect((await setServerDisabled(agentDir, cwd, false, "docs", false, () => {})).scope).toBe("global");
-  expect(await readFile(join(cwd, ".mcp.json"), "utf8")).toBe("invalid secret JSON");
+  expect(await readFile(join(cwd, ".pi", "mcp.json"), "utf8")).toBe("invalid secret JSON");
 });
 
 test("toggles preserve symlinks and permissions and serialize concurrent updates", async () => {
@@ -64,7 +64,7 @@ test("toggles preserve symlinks and permissions and serialize concurrent updates
 test("global and project aliases of the same file do not deadlock", async () => {
   const { agentDir, cwd, put } = await fixture();
   await put(join(agentDir, "mcp.json"), { mcpServers: { docs: { command: "node" } } });
-  await symlink(join(agentDir, "mcp.json"), join(cwd, ".mcp.json"));
+  await symlink(join(agentDir, "mcp.json"), join(cwd, ".pi", "mcp.json"));
   await setServerDisabled(agentDir, cwd, true, "docs", true, () => {});
   expect((await loadConfig(agentDir, cwd, true)).docs.disabled).toBe(true);
 });
@@ -72,7 +72,7 @@ test("global and project aliases of the same file do not deadlock", async () => 
 test("failed validation and missing servers never change configuration", async () => {
   const { agentDir, cwd, put } = await fixture();
   const path = join(agentDir, "mcp.json");
-  await put(path, { mcpServers: { docs: { command: "node", disabled: true } } });
+  await put(path, { mcpServers: { docs: { command: "node", enabled: false } } });
   const before = await readFile(path, "utf8");
   await expect(setServerDisabled(agentDir, cwd, false, "missing", false, () => {})).rejects.toThrow();
   await expect(setServerDisabled(agentDir, cwd, false, "docs", false, () => { throw new Error("invalid"); })).rejects.toThrow("invalid");
@@ -104,20 +104,21 @@ test("rejects unsupported transports, conflicting definitions, and invalid inlin
     { type: "http", command: "node" },
     { type: "stdio", url: "https://example.com/mcp" },
     { type: "sse", url: "https://example.com/sse" },
-    { type: "streamable-http", url: "https://example.com/mcp" },
     { type: null, command: "node" },
     { type: 1, command: "node" },
     { type: "http" },
     { type: "stdio", command: "node", url: "https://example.com/mcp" },
-    { command: "node", oauth: true },
+    { command: "node", oauth: {} },
     { url: "https://example.com/mcp", oauth: "yes" },
-    { command: "node", includeTools: [1] },
-    { command: "node", excludeTools: "delete_*" },
-    { command: "node", disabled: "yes" },
+    { url: "https://example.com/mcp", oauth: { unknown: 1 } },
+    { command: "node", toolExposure: { search: "sometimes" } },
+    { command: "node", toolExposure: [] },
+    { command: "node", exposure: "loud" },
+    { command: "node", enabled: "yes" },
     { command: "node", description: "" },
-    { command: "node", timeoutMs: -1 },
+    { command: "node", timeout: -1 },
     { command: "node", protocol: "unknown" },
-    { disabled: true },
+    { enabled: false },
   ]) expect(() => parseConfig({ mcpServers: { example: entry } })).toThrow();
 });
 
@@ -125,21 +126,37 @@ test("all client options live directly in the server definition", async () => {
   const { agentDir, cwd, put } = await fixture();
   const fields = {
     url: "https://example.com/mcp",
-    oauthClientId: "client",
-    disabled: false,
+    oauth: { clientId: "client", scope: "read write", callbackPort: 12345, dpop: true },
+    enabled: true,
     description: "Docs",
-    includeTools: ["get_*"],
-    excludeTools: ["get_secret"],
-    timeoutMs: 1000,
+    exposure: "hidden",
+    toolExposure: { "get_*": "codemode", get_secret: "hidden" },
+    timeout: 1,
+    startupTimeout: 2.5,
+    toolTimeout: 30,
     protocol: "auto" as const,
   };
-  const document = { mcpServers: { docs: { type: "http", ...fields } } };
+  const normalized: ServerConfig = {
+    url: "https://example.com/mcp",
+    oauthClientId: "client",
+    oauthScopes: ["read", "write"],
+    oauthCallbackPort: 12345,
+    oauthDpop: true,
+    description: "Docs",
+    exposure: "hidden",
+    toolExposure: { "get_*": "codemode", get_secret: "hidden" },
+    timeoutMs: 1000,
+    startupTimeoutMs: 2500,
+    toolTimeoutMs: 30_000,
+    protocol: "auto",
+  };
+  const document = { mcpServers: { docs: { type: "streamable-http", ...fields } } };
   await put(join(agentDir, "mcp.json"), document);
-  expect(parseConfig(document).docs).toEqual(fields);
-  expect((await loadConfig(agentDir, cwd, true)).docs).toEqual(fields);
+  expect(parseConfig(document).docs).toEqual(normalized);
+  expect((await loadConfig(agentDir, cwd, true)).docs).toEqual(normalized);
   const parsed = parseConfig(document);
-  parsed.docs.includeTools!.push("other");
-  expect(document.mcpServers.docs.includeTools).toEqual(["get_*"]);
+  parsed.docs.toolExposure!.other = "hidden";
+  expect(document.mcpServers.docs.toolExposure).toEqual({ "get_*": "codemode", get_secret: "hidden" });
 });
 
 test("project definitions replace connections and options in full", async () => {
@@ -150,22 +167,21 @@ test("project definitions replace connections and options in full", async () => 
         url: "https://global.example/mcp",
         headers: { Authorization: "global-secret" },
         description: "Documentation",
-        timeoutMs: 2000,
-        includeTools: ["get_*"],
-        excludeTools: ["get_secret"],
-        disabled: true,
+        timeout: 2,
+        toolExposure: { get_secret: "hidden" },
+        enabled: false,
       },
-      local: { command: "node", disabled: true },
+      local: { command: "node", enabled: false },
     },
   });
-  await put(join(cwd, ".mcp.json"), {
+  await put(join(cwd, ".pi", "mcp.json"), {
     mcpServers: {
-      docs: { type: "http", url: "https://project.example/mcp", timeoutMs: 1000, includeTools: [] },
+      docs: { type: "http", url: "https://project.example/mcp", timeout: 1, exposure: "hidden" },
     },
   });
   const config = await loadConfig(agentDir, cwd, true);
   expect(config.docs).toEqual({
-    url: "https://project.example/mcp", timeoutMs: 1000, includeTools: [],
+    url: "https://project.example/mcp", timeoutMs: 1000, exposure: "hidden",
   });
   expect(config.local).toEqual({ command: "node", disabled: true });
 });
@@ -173,9 +189,9 @@ test("project definitions replace connections and options in full", async () => 
 test("untrusted projects cannot override connections or options", async () => {
   const { agentDir, cwd, put } = await fixture();
   await put(join(agentDir, "mcp.json"), {
-    mcpServers: { docs: { url: "https://global.example/mcp", disabled: true } },
+    mcpServers: { docs: { url: "https://global.example/mcp", enabled: false } },
   });
-  await put(join(cwd, ".mcp.json"), { invalid: "must not be parsed", pi: {} });
+  await put(join(cwd, ".pi", "mcp.json"), { invalid: "must not be parsed", pi: {} });
   expect((await loadConfig(agentDir, cwd, false)).docs).toEqual({
     url: "https://global.example/mcp", disabled: true,
   });
@@ -183,13 +199,13 @@ test("untrusted projects cannot override connections or options", async () => {
 
 test("removed pi sections fail explicitly rather than silently losing restrictions", async () => {
   const { agentDir, cwd, put } = await fixture();
-  for (const pi of [null, {}, { servers: { docs: { includeTools: [] } } }]) {
+  for (const pi of [null, {}, { servers: { docs: { exposure: "hidden" } } }]) {
     const document = { mcpServers: { docs: { url: "https://example.com/mcp" } }, pi };
     expect(() => parseConfig(document)).toThrow("Put server options directly in mcpServers.<server>");
     await put(join(agentDir, "mcp.json"), document);
     await expect(loadConfig(agentDir, cwd, true)).rejects.toThrow("pi section is not supported");
   }
   await put(join(agentDir, "mcp.json"), { mcpServers: {} });
-  await put(join(cwd, ".mcp.json"), { mcpServers: {}, pi: {} });
+  await put(join(cwd, ".pi", "mcp.json"), { mcpServers: {}, pi: {} });
   await expect(loadConfig(agentDir, cwd, true)).rejects.toThrow("pi section is not supported");
 });

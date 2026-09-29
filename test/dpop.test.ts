@@ -225,13 +225,14 @@ test("unbound Bearer requests skip DPoP keyring reads but still check token fres
 });
 
 test("DPoP configuration is explicit, OAuth-only, and safe to inspect", async () => {
+  const definition = { url: "https://example.com/mcp", oauth: { dpop: true } };
   const config = { url: "https://example.com/mcp", oauthDpop: true };
-  expect(parseConfig({ mcpServers: { example: config } }).example).toEqual(config);
-  for (const definition of [{ ...config, oauthDpop: "true" }, { command: "server", oauthDpop: true }])
+  expect(parseConfig({ mcpServers: { example: definition } }).example).toEqual(config);
+  for (const definition of [{ url: config.url, oauth: { dpop: "true" } }, { command: "server", oauth: { dpop: true } }])
     expect(() => parseConfig({ mcpServers: { example: definition } })).toThrow();
   expect(() => resolveServer({ ...config, headers: { Authorization: "private" } }, "/")).toThrow("not both");
   const command = parseConfigCommand("add --scope global --oauth-dpop example https://example.com/mcp");
-  expect(command?.action === "add" && command.definition.oauthDpop).toBe(true);
+  expect(command?.action === "add" && (command.definition.oauth as { dpop?: boolean }).dpop).toBe(true);
   expect(() => parseConfigCommand("add --scope global --oauth-dpop example -- server")).toThrow();
   expect(inspectServer("example", config, "idle")).toContain("DPoP: enabled");
   const store = memoryStore();

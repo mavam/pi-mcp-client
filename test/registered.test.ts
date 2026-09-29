@@ -21,10 +21,10 @@ test("registered servers translate Pi's configuration shape", () => {
   expect([...names]).toEqual(["stdio", "http", "locked", "off"]);
   expect(config.stdio).toMatchObject({ command: "node", disabled: true, timeoutMs: 5000 });
   expect(config.http).toMatchObject({
-    oauthClientId: "id", oauthScopes: ["read", "write"], oauthCallbackPort: 8765, excludeTools: ["delete_*"],
+    oauthClientId: "id", oauthScopes: ["read", "write"], oauthCallbackPort: 8765, toolExposure: { "delete_*": "hidden" },
   });
-  expect(config.locked?.includeTools).toEqual(["search"]);
-  expect(config.off?.disabled).toBe(true);
+  expect(config.locked).toMatchObject({ exposure: "hidden", toolExposure: { search: "direct" } });
+  expect(config.off).toMatchObject({ exposure: "hidden" });
 });
 
 test("mcp.json wins and invalid registrations are reported without secrets", () => {

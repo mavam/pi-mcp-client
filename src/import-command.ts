@@ -1,5 +1,5 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { ConfigMutationError, inspectConfigScopes, type Config, type ConfigMutation, type ConfigScope } from "./config.js";
+import { ConfigMutationError, inspectConfigScopes, type ConfigMutation, type ConfigScope, type FileServer } from "./config.js";
 import { importPreview, parseImportCommand, readImportSource, validImportName, validateImportCandidate } from "./imports.js";
 
 type Scopes = Awaited<ReturnType<typeof inspectConfigScopes>>;
@@ -52,7 +52,7 @@ export async function runImportCommand(
     ctx.ui.notify("No servers found in the import file. Nothing was changed.", "info");
     return;
   }
-  const selected: Config = Object.create(null);
+  const selected: Record<string, FileServer> = Object.create(null);
   const summary: string[] = [];
   const cancel = () => ctx.ui.notify("Import cancelled. Nothing was saved.", "info");
   if (source.ignoredTopLevel) {

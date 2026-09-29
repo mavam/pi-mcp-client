@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { authenticate, callbackUrl, OAuthProvider, parseCallback, type SecretStore } from "../src/auth.js";
-import { parseConfig } from "../src/config.js";
+import { parseConfig, type ServerConfig } from "../src/config.js";
 import { parseConfigCommand, configCommandCompletions } from "../src/config-commands.js";
 import { inspectServer } from "../src/management.js";
 import { oauthCallbackHtml } from "../src/oauth-page.js";
@@ -12,16 +12,17 @@ function memoryStore(): SecretStore {
 
 const definition = { url: "https://example.com/mcp" };
 test("OAuth scopes and callback ports validate strictly and require HTTP OAuth", () => {
-  for (const oauthScopes of [[], ["read", "read"], ["read write"], [""], ["quote\""], ["back\\slash"], ["é"], ["newline\n"], [4], "read", ["x".repeat(257)]])
-    expect(() => parseConfig({ mcpServers: { test: { ...definition, oauthScopes } } })).toThrow();
-  for (const oauthCallbackPort of [0, -1, 65536, 1.5, "19847", null])
-    expect(() => parseConfig({ mcpServers: { test: { ...definition, oauthCallbackPort } } })).toThrow();
-  for (const option of [{ oauthScopes: ["read"] }, { oauthCallbackPort: 19848 }]) {
-    expect(parseConfig({ mcpServers: { test: { url: definition.url, ...option } } }).test).toEqual({ url: definition.url, ...option });
+  for (const scope of ["", " ", "read read", "quote\"", "back\\slash", "é", "newline\n", 4, ["read"], "x".repeat(257)])
+    expect(() => parseConfig({ mcpServers: { test: { ...definition, oauth: { scope } } } })).toThrow();
+  for (const callbackPort of [0, -1, 65536, 1.5, "19847", null])
+    expect(() => parseConfig({ mcpServers: { test: { ...definition, oauth: { callbackPort } } } })).toThrow();
+  const cases: [object, ServerConfig][] = [[{ scope: "read" }, { oauthScopes: ["read"] }], [{ callbackPort: 19848 }, { oauthCallbackPort: 19848 }]];
+  for (const [oauth, option] of cases) {
+    expect(parseConfig({ mcpServers: { test: { url: definition.url, oauth } } }).test).toEqual({ url: definition.url, ...option });
     for (const transport of [{ command: "server" }])
-      expect(() => parseConfig({ mcpServers: { test: { ...transport, ...option } } })).toThrow();
+      expect(() => parseConfig({ mcpServers: { test: { ...transport, oauth } } })).toThrow();
   }
-  const config = parseConfig({ mcpServers: { test: { ...definition, oauthScopes: ["read", "api:write"], oauthCallbackPort: 19848 } } }).test;
+  const config = parseConfig({ mcpServers: { test: { ...definition, oauth: { scope: "read api:write", callbackPort: 19848 } } } }).test;
   const summary = inspectServer("test", config, "idle");
   expect(summary).toContain("Requested scopes: read, api:write");
   expect(summary).toContain("http://127.0.0.1:19848/callback");
@@ -31,7 +32,7 @@ test("OAuth scopes and callback ports validate strictly and require HTTP OAuth",
 
 test("add accepts repeatable scopes and a single numeric callback port", () => {
   const command = parseConfigCommand("add --scope global --oauth-scope read --oauth-scope write --oauth-callback-port 19848 service https://example.com/mcp");
-  expect(command?.action === "add" && command.definition).toEqual({ ...definition, oauthScopes: ["read", "write"], oauthCallbackPort: 19848 });
+  expect(command?.action === "add" && command.definition).toEqual({ ...definition, oauth: { scope: "read write", callbackPort: 19848 } });
   for (const port of ["0", "65536", "1.5", "1e3", "0x1234"])
     expect(() => parseConfigCommand(`add --scope global --oauth-callback-port ${port} service https://example.com`)).toThrow();
   expect(() => parseConfigCommand("add --scope global --oauth-callback-port 12 --oauth-callback-port 13 service https://example.com")).toThrow();

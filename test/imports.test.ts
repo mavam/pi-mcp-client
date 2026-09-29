@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { inspectConfigScopes, loadConfig, resolveServer, updateServerConfig, type Config, type ConfigMutation } from "../src/config.js";
+import { inspectConfigScopes, loadConfig, resolveServer, updateServerConfig, type Config, type ConfigMutation, type FileServer } from "../src/config.js";
 import { configCommandCompletions } from "../src/config-commands.js";
 import { importPreview, MAX_IMPORT_BYTES, parseImportCommand, parseImportSource, readImportSource, validateImportCandidate } from "../src/imports.js";
 import { resolveSecrets } from "../src/secrets.js";
@@ -16,12 +16,12 @@ async function fixture() {
   directories.push(root);
   const agentDir = join(root, "agent");
   const cwd = join(root, "project");
-  await mkdir(cwd);
+  await mkdir(join(cwd, ".pi"), { recursive: true });
   const sourcePath = join(root, "source.json");
   const validate = (config: Config) => {
     for (const definition of Object.values(config)) if (!definition.disabled) resolveServer(definition, cwd);
   };
-  const plan = async (servers: Config, scope: "global" | "project" = "global", trusted = true): Promise<Extract<ConfigMutation, { action: "import" }>> => ({
+  const plan = async (servers: Record<string, FileServer>, scope: "global" | "project" = "global", trusted = true): Promise<Extract<ConfigMutation, { action: "import" }>> => ({
     action: "import", scope, servers, sourcePath,
     expected: (await inspectConfigScopes(agentDir, cwd, trusted)).expected,
   });
@@ -51,7 +51,7 @@ test("import command requires a scope and one quoted path without shell expansio
 
 test("source parsing isolates unsupported entries without dropping server fields", () => {
   const result = parseImportSource(JSON.stringify({ unrelated: "private-setting", mcpServers: {
-    local: { type: "stdio", command: "private-command", args: ["private-arg"], disabled: true },
+    local: { type: "stdio", command: "private-command", args: ["private-arg"], enabled: false },
     remote: { type: "http", url: "https://example.com/private-token", headers: { Authorization: "private-header" } },
     sse: { type: "sse", url: "https://example.com/private-token" },
     unknown: { command: "node", autoApprove: ["private-value"] },
@@ -61,7 +61,7 @@ test("source parsing isolates unsupported entries without dropping server fields
   } }));
   expect(result.ignoredTopLevel).toBe(1);
   expect(result.candidates).toHaveLength(7);
-  expect(result.candidates[0].definition).toEqual({ command: "private-command", args: ["private-arg"], disabled: true });
+  expect(result.candidates[0].definition).toEqual({ type: "stdio", command: "private-command", args: ["private-arg"], enabled: false });
   expect(result.candidates[1].definition).toMatchObject({ url: "https://example.com/private-token" });
   expect(result.candidates[2].problem).toContain("SSE");
   expect(result.candidates[3].problem).toContain("unsupported server field");
@@ -86,9 +86,9 @@ test("foreign variable and secret-command syntax is never silently reinterpreted
     } };
     const entry = parseImportSource(source({ local: raw })).candidates[0];
     expect(entry.escapedLiterals).toBe(true);
-    expect(entry.definition!.env!.COMMAND).toStartWith("$!");
+    expect((entry.definition!.env as Record<string, string>).COMMAND).toStartWith("$!");
     expect(validateImportCandidate(entry, f.cwd)).toBeUndefined();
-    const resolved = await resolveSecrets(resolveServer(entry.definition!, f.cwd), entry.definition!, f.cwd, new AbortController().signal);
+    const resolved = await resolveSecrets(resolveServer(entry.config!, f.cwd), entry.config!, f.cwd, new AbortController().signal);
     expect(resolved.env).toEqual({ ...raw.env, REF: "resolved-private-token", MIX: "resolved-private-token $MCP_IMPORT_TOKEN" });
     expect(JSON.stringify(entry.definition)).not.toContain("resolved-private-token");
     await expect(stat(marker)).rejects.toThrow();
@@ -167,17 +167,17 @@ test("stale previews reject new conflicts, changed definitions, and changed syml
   await expect(f.save(second)).rejects.toThrow("changed since the preview");
   expect(await readFile(target, "utf8")).toBe(before);
   const third = await f.plan({ new: { command: "node" } });
-  await writeFile(join(f.cwd, ".mcp.json"), source({ new: { command: "project" } }));
+  await writeFile(join(f.cwd, ".pi", "mcp.json"), source({ new: { command: "project" } }));
   await expect(f.save(third)).rejects.toThrow("changed since the preview");
 });
 
 test("validation and cancellation roll back the entire batch, including shadowed and disabled entries", async () => {
   const f = await fixture();
   await f.save(await f.plan({ existing: { command: "node" } }));
-  await writeFile(join(f.cwd, ".mcp.json"), source({ invalid: { command: "project" } }));
+  await writeFile(join(f.cwd, ".pi", "mcp.json"), source({ invalid: { command: "project" } }));
   const file = join(f.agentDir, "mcp.json");
   const before = await readFile(file, "utf8");
-  await expect(f.save(await f.plan({ good: { command: "node" }, invalid: { url: "ftp://example.com", disabled: true } }))).rejects.toThrow();
+  await expect(f.save(await f.plan({ good: { command: "node" }, invalid: { url: "ftp://example.com", enabled: false } }))).rejects.toThrow();
   expect(await readFile(file, "utf8")).toBe(before);
   let validations = 0;
   await expect(f.save(await f.plan({ good: { command: "node" } }), true, () => {
@@ -195,15 +195,15 @@ test("scopes retain precedence, protect untrusted projects, and refuse source/de
   expect((await loadConfig(f.agentDir, f.cwd, true)).docs.url).toBe("https://project.example");
   await f.save(await f.plan({ docs: { url: "https://updated.example" } }));
   expect((await loadConfig(f.agentDir, f.cwd, true)).docs.url).toBe("https://project.example");
-  await writeFile(join(f.cwd, ".mcp.json"), "untrusted-private-content");
+  await writeFile(join(f.cwd, ".pi", "mcp.json"), "untrusted-private-content");
   await expect(f.save(await f.plan({ docs: { command: "node" } }, "project", false), false)).rejects.toThrow("trusted project");
   await f.save(await f.plan({ local: { command: "node" } }, "global", false), false);
-  expect(await readFile(join(f.cwd, ".mcp.json"), "utf8")).toBe("untrusted-private-content");
+  expect(await readFile(join(f.cwd, ".pi", "mcp.json"), "utf8")).toBe("untrusted-private-content");
   const mutation = await f.plan({ docs: { command: "node" } }, "global", false);
   mutation.sourcePath = await realpath(join(f.agentDir, "mcp.json"));
   await expect(f.save(mutation, false)).rejects.toThrow("same file");
-  await rm(join(f.cwd, ".mcp.json"));
-  await symlink(join(f.agentDir, "mcp.json"), join(f.cwd, ".mcp.json"));
+  await rm(join(f.cwd, ".pi", "mcp.json"));
+  await symlink(join(f.agentDir, "mcp.json"), join(f.cwd, ".pi", "mcp.json"));
   await expect(inspectConfigScopes(f.agentDir, f.cwd, true)).rejects.toThrow("share a file");
-  expect((await lstat(join(f.cwd, ".mcp.json"))).isSymbolicLink()).toBe(true);
+  expect((await lstat(join(f.cwd, ".pi", "mcp.json"))).isSymbolicLink()).toBe(true);
 });

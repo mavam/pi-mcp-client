@@ -1,4 +1,4 @@
-import { ConfigMutationError, type ConfigMutation, type ConfigScope, type ServerConfig } from "./config.js";
+import { ConfigMutationError, type ConfigMutation, type ConfigScope, type FileServer } from "./config.js";
 
 export const ADD_USAGE = "Usage: /mcp add --scope global|project [--replace] [--transport http|stdio] [--header 'Name: value'] [--env KEY=value] [--oauth-client-id ID] [--oauth-scope SCOPE] [--oauth-callback-port PORT] [--oauth-dpop] <server> <url> OR <server> -- <command> [args...]. Put options before the server name.";
 export const REMOVE_USAGE = "Usage: /mcp remove --scope global|project <server>. Credentials are retained; log out first if you want to remove them.";
@@ -52,7 +52,10 @@ export function parseConfigCommand(input: string): Extract<ConfigMutation, { act
   let scope: ConfigScope | undefined;
   let replace = false;
   let transport: "http" | "stdio" | undefined;
-  const definition: ServerConfig = {};
+  const definition: FileServer = {};
+  const oauth: { clientId?: string; scope?: string; callbackPort?: number; dpop?: boolean } = {};
+  const env: Record<string, string> = {};
+  const headers: Record<string, string> = {};
   const seen = new Set<string>();
   let index = 1;
   while (words[index]?.startsWith("--")) {
@@ -60,7 +63,7 @@ export function parseConfigCommand(input: string): Extract<ConfigMutation, { act
     if (seen.has(flag) && flag !== "--header" && flag !== "--env" && flag !== "--oauth-scope") fail();
     seen.add(flag);
     if (flag === "--replace" && action === "add") { replace = true; continue; }
-    if (flag === "--oauth-dpop" && action === "add") { definition.oauthDpop = true; continue; }
+    if (flag === "--oauth-dpop" && action === "add") { oauth.dpop = true; continue; }
     if (flag === "--oauth")
       throw new ConfigMutationError("Remove --oauth; HTTP authentication is automatic.");
     const value = words[index++];
@@ -73,21 +76,21 @@ export function parseConfigCommand(input: string): Extract<ConfigMutation, { act
       if (value !== "http" && value !== "stdio") fail();
       transport = value as "http" | "stdio";
     } else if (flag === "--oauth-client-id") {
-      definition.oauthClientId = value;
+      oauth.clientId = value;
     } else if (flag === "--oauth-scope") {
-      definition.oauthScopes = [...(definition.oauthScopes ?? []), value];
+      oauth.scope = oauth.scope === undefined ? value : `${oauth.scope} ${value}`;
     } else if (flag === "--oauth-callback-port") {
       if (!/^[0-9]+$/u.test(value) || Number(value) < 1 || Number(value) > 65535) fail();
-      definition.oauthCallbackPort = Number(value);
+      oauth.callbackPort = Number(value);
     } else if (flag === "--env") {
       const match = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/su.exec(value);
-      if (!match || Object.hasOwn(definition.env ?? {}, match[1])) fail();
-      definition.env = { ...definition.env, [match![1]]: match![2] };
+      if (!match || Object.hasOwn(env, match[1])) fail();
+      env[match![1]] = match![2];
     } else if (flag === "--header") {
       const match = /^([!#$%&'*+.^_`|~0-9A-Za-z-]+):[ \t]*(.*)$/su.exec(value);
       if (!match || /[\r\n]/u.test(match[2]) ||
-          Object.keys(definition.headers ?? {}).some((name) => name.toLowerCase() === match[1].toLowerCase())) fail();
-      definition.headers = { ...definition.headers, [match![1]]: match![2] };
+          Object.keys(headers).some((name) => name.toLowerCase() === match[1].toLowerCase())) fail();
+      headers[match![1]] = match![2];
     } else fail();
   }
   const server = words[index++];
@@ -100,11 +103,14 @@ export function parseConfigCommand(input: string): Extract<ConfigMutation, { act
     if (transport === "http") fail();
     definition.command = words[++index];
     definition.args = words.slice(index + 1);
-    if (!definition.command || definition.oauthClientId || definition.oauthScopes || definition.oauthCallbackPort || definition.oauthDpop || definition.headers) fail();
+    if (!definition.command || Object.keys(oauth).length || Object.keys(headers).length) fail();
+    if (Object.keys(env).length) definition.env = env;
   } else {
-    if (transport === "stdio" || index + 1 !== words.length || definition.env) fail();
+    if (transport === "stdio" || index + 1 !== words.length || Object.keys(env).length) fail();
     definition.url = words[index];
     if (!definition.url) fail();
+    if (Object.keys(headers).length) definition.headers = headers;
+    if (Object.keys(oauth).length) definition.oauth = oauth;
   }
   return { action, scope: scope!, server, definition, replace };
 }

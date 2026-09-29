@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { ProjectTrustStore, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -101,7 +101,8 @@ test("imports review source settings and save only accepted definitions without 
 test("conflicts offer explicit replacement, renaming, and scope precedence without credential merging", async () => {
   const h = await host(document({ existing: { url: "https://old.example", headers: { Authorization: "old-private-token" } } }));
   h.trust();
-  await writeFile(join(h.directory, ".mcp.json"), document({ existing: { command: "project-command" } }));
+  await mkdir(join(h.directory, ".pi"), { recursive: true });
+  await writeFile(join(h.directory, ".pi", "mcp.json"), document({ existing: { command: "project-command" } }));
   await h.command("reload");
   await writeFile(h.source, document({ existing: { url: "https://new.example" } }));
   await h.command();

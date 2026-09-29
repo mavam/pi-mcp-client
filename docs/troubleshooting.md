@@ -41,18 +41,18 @@ unavailable server isn't an empty catalog.
 | `elicitation_declined` | You declined or dismissed the server's web page request, so the tool didn't run. Ask the model to retry when you're ready. |
 | `elicitation_completed` | You completed the server's web page step. The tool didn't run yet; the model can call it again. |
 | `oauth_failed` | An unclassified OAuth failure. Check the service's requirements and `/mcp get <server>` for the client type, scopes, and callback URL. Only public/PKCE clients are supported, not clients requiring a secret. |
-| `oauth_client_required` | The server doesn't support dynamic registration. Configure `oauthClientId` for a registered public/PKCE client and register the exact callback URL. Reload, then log in again. |
+| `oauth_client_required` | The server doesn't support dynamic registration. Configure `oauth.clientId` for a registered public/PKCE client and register the exact callback URL. Reload, then log in again. |
 | `oauth_registration_rejected` | The server rejected dynamic registration. Check public/native client eligibility and the callback URL, or configure an approved public client ID. |
 | `oauth_client_rejected` | Check the client ID, app approval, and public-client authentication (token endpoint method `none`). A rejected client doesn't necessarily mean a client secret is required. |
 | `oauth_pkce_unsupported` | The authorization server must support S256 PKCE. Login without PKCE isn't supported. |
 | `oauth_scope_required` | Run `/mcp login <server>` to review additional permissions, then explicitly retry the operation. |
 | `oauth_dpop_unavailable` | Enable DPoP again, or log out before signing in if you disabled it deliberately or its stored key is corrupt or mismatched. |
-| `oauth_scope_rejected` | Check `oauthScopes` against the service's allowed scopes and app permissions. Reload after changes, then log in again. |
+| `oauth_scope_rejected` | Check `oauth.scope` against the service's allowed scopes and app permissions. Reload after changes, then log in again. |
 | `oauth_grant_rejected` | Log in again for a fresh code. If it still fails, check the client and exact callback URL. |
 | `oauth_redirect_rejected` | Register the exact callback host, port, and `/callback` path shown by `/mcp get <server>`. Manual login uses the same callback URL. |
 | `oauth_endpoint_insecure` | The token endpoint must use HTTPS unless it is on loopback. Don't disable TLS verification. |
 | `oauth_issuer_changed` | Verify the authorization-server change before logging out and logging in again. |
-| `callback_unavailable` | Another process using the configured loopback port (default 19847). Change `oauthCallbackPort` or use `/mcp login <server> --no-browser`. |
+| `callback_unavailable` | Another process using the configured loopback port (default 19847). Change `oauth.callbackPort` or use `/mcp login <server> --no-browser`. |
 | `busy` | Wait for discovery to finish before reconnecting. |
 | `cancelled` | Retry when ready; verify any interrupted tool operation first. |
 | `operation_failed` | An unclassified failure; inspect server status and configuration. |
@@ -84,10 +84,9 @@ if another login is needed; the warning alone doesn't mean sign-in started.
 
 ## Missing project servers
 
-A project's `.mcp.json` loads only after an explicit trust decision, even in
-folders that Pi otherwise trusts implicitly. Headless sessions ignore it when no
-decision exists. Run Pi's `/trust` command to save a decision, then run
-`/mcp reload`. See [project trust](behavior.md#project-trust).
+A project's `.pi/mcp.json` loads only in a project that Pi trusts. Headless
+sessions ignore it when Pi has no decision. Run Pi's `/trust` command to save a
+decision, then run `/mcp reload`. See [project trust](behavior.md#project-trust).
 
 ## Missing server dependencies
 
