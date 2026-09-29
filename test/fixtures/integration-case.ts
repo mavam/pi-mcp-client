@@ -253,25 +253,15 @@ async function run() {
       expect(JSON.stringify(requests[2])).toContain("Resource body sentinel");
       expect(JSON.stringify(requests[2])).not.toContain("mcp__fixture__echo");
       expect(requests[2].tools).toEqual(requests[0].tools);
-      expect(readResult?.role === "toolResult" && readResult.addedToolNames?.length || 0).toBe(0);
       expect(readResult?.role === "toolResult" && readResult.details).not.toHaveProperty("loaded");
-      expect(discoveryResult?.role === "toolResult" && discoveryResult.addedToolNames?.length || 0).toBe(0);
       expect(discoveryResult?.role === "toolResult" && discoveryResult.details).toHaveProperty("candidates");
       expect(discoveryResult?.role === "toolResult" && discoveryResult.details).not.toHaveProperty("loaded");
-      expect(loaderResult?.role === "toolResult" && loaderResult.addedToolNames).toEqual(["mcp__fixture__echo"]);
+      expect(loaderResult?.role === "toolResult" && (loaderResult.details as any)?.loaded?.map((tool: any) => tool.nativeName)).toEqual(["mcp__fixture__echo"]);
       expect(JSON.stringify(requests[3])).toContain("mcp__fixture__echo");
-      if (mode === "fallback") {
-        expect(requests[3].tools.map((tool: any) => tool.name)).toEqual(["mcp_tools", "mcp__fixture__echo"]);
-        expect(JSON.stringify(requests[3].messages)).not.toContain("tool_reference");
-      } else if (provider === "anthropic") {
-        expect(JSON.stringify(requests[3].messages)).toContain("tool_reference");
-        expect(JSON.stringify(requests[3].system)).toBe(JSON.stringify(requests[0].system));
-      } else {
-        // Pi 0.85.1 anchors native definitions with additional_tools on Responses.
-        expect(requests[3].input.some((item: any) => item.type === "additional_tools")).toBe(true);
-        expect(requests[3].input[0]).toEqual(requests[0].input[0]);
-        expect(requests[3].tools).toEqual(requests[0].tools);
-      }
+      // Pi 0.99 declares newly loaded tools in the tool list and leaves the prefix untouched.
+      expect(requests[3].tools.map((tool: any) => tool.name)).toEqual(["mcp_tools", "mcp__fixture__echo"]);
+      expect(JSON.stringify(requests[3].system)).toBe(JSON.stringify(requests[0].system));
+      if (provider === "openai") expect(requests[3].input[0]).toEqual(requests[0].input[0]);
       expect(called).toBe(1);
       const callResult = session.messages.find(
         (message) =>

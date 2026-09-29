@@ -30,7 +30,7 @@ async function host(configuration = document({})) {
     registerTool: () => {}, registerMessageRenderer: () => {}, registerEntryRenderer: () => {},
     registerCommand: (name: string, command: any) => commands.set(name, command),
     on: (name: string, handler: any) => hooks.set(name, handler),
-    getActiveTools: () => active, getAllTools: () => [],
+    getActiveTools: () => active, getAllTools: () => [], getMcpServers: () => [],
     setActiveTools: (names: string[]) => { active = names; },
     sendMessage: () => { messages++; }, appendEntry: () => { messages++; },
   } as unknown as ExtensionAPI, { agentDir: directory, credentialStore: async () => { credentials++; throw new Error("unexpected credential access"); } });

@@ -49,7 +49,7 @@ async function host(options: Options = {}) {
     registerCommand: (name: string, command: any) => commands.set(name, command),
     registerMessageRenderer: () => {}, registerEntryRenderer: () => {},
     on: (name: string, handler: any) => hooks.set(name, handler),
-    getActiveTools: () => ["mcp_tools"], getAllTools: () => [...tools.values()], setActiveTools: () => {},
+    getMcpServers: () => [], getActiveTools: () => ["mcp_tools"], getAllTools: () => [...tools.values()], setActiveTools: () => {},
     sendMessage: () => {}, appendEntry: () => {},
   } as unknown as ExtensionAPI, { agentDir, credentialStore: async () => { throw new Error("unexpected credential access"); } });
   const ctx = {

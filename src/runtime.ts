@@ -1125,10 +1125,11 @@ export class McpRuntime {
     isCurrent: () => boolean,
   ): Promise<void> {
     const text = JSON.stringify(
-      tools.map(({ name, description, inputSchema }) => ({
+      tools.map(({ name, description, inputSchema, annotations }) => ({
         name,
         description,
         inputSchema,
+        annotations,
       })),
     );
     if (Buffer.byteLength(text) > 4 * 1024 * 1024) return;
