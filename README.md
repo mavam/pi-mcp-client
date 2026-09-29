@@ -67,7 +67,7 @@ Detailed guides:
 
 ## 🧰 Requirements
 
-- Pi 0.85.1 or later.
+- Pi 0.99 or later.
 - Node.js 22 or later.
 - The server executable for stdio connections.
 - An available OS credential store for OAuth. Linux requires a working Secret
