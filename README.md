@@ -6,12 +6,12 @@ resources. You can also browse, preview, and use server-provided prompts.
 > [!NOTE]
 > On Pi **0.99.1 and later**, this extension is no longer needed for basic MCP
 > use: Pi has built-in support for server tools, resources, and OAuth. Keep this
-> extension if you need separate accounts at the same endpoint, OS-backed
-> credential storage, or the additional features below.
+> extension if you need OS-backed credential storage or the additional features
+> below.
 
 ## ⚖️ Do you need this extension?
 
-Comparison with **Pi 0.99.2**.
+Comparison with [Pi's upstream `main`](https://github.com/earendil-works/pi/tree/main).
 
 | Feature | Built-in MCP | Pi MCP Client |
 | --- | :---: | :---: |
@@ -19,7 +19,7 @@ Comparison with **Pi 0.99.2**.
 | OAuth sign-in and token refresh | ✅ | ✅ |
 | Tool namespaces and codemode calls | ✅ | ✅ |
 | Resource listing, URI templates, and reads | ✅ | ✅ |
-| [Separate OAuth accounts at the same endpoint](docs/authentication.md#use-multiple-accounts) | ❌ | ✅ |
+| [Separate OAuth accounts at the same endpoint](docs/authentication.md#use-multiple-accounts) | ✅ | ✅ |
 | [OAuth credentials in the OS credential store](docs/authentication.md#sign-in-with-oauth) | ❌ | ✅ |
 | [DPoP-bound OAuth tokens](docs/authentication.md#use-dpop-bound-tokens) | ❌ | ✅ |
 | [Server prompts with preview before use](docs/commands.md#use-server-prompts) | ❌ | ✅ |
@@ -33,8 +33,6 @@ Comparison with **Pi 0.99.2**.
 Both read the same `mcp.json` files, but OAuth credentials don't transfer between
 implementations. See
 [switching to built-in MCP](docs/behavior.md#pis-built-in-mcp-support).
-Built-in account isolation is tracked in
-[upstream issue #10252](https://github.com/earendil-works/pi/issues/10252).
 
 ## 🚀 Installation
 
