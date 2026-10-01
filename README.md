@@ -3,6 +3,39 @@
 Connect Pi to MCP servers so the model can use their tools and read their
 resources. You can also browse, preview, and use server-provided prompts.
 
+> [!NOTE]
+> On Pi **0.99.1 and later**, this extension is no longer needed for basic MCP
+> use: Pi has built-in support for server tools, resources, and OAuth. Keep this
+> extension if you need separate accounts at the same endpoint, OS-backed
+> credential storage, or the additional features below.
+
+## ⚖️ Do you need this extension?
+
+Comparison with **Pi 0.99.2**. ✅ means supported; ❌ means not supported.
+
+| Feature | Built-in MCP | Pi MCP Client |
+| --- | :---: | :---: |
+| HTTP and stdio server tools | ✅ | ✅ |
+| OAuth sign-in and token refresh | ✅ | ✅ |
+| Tool namespaces and codemode calls | ✅ | ✅ |
+| Resource listing, URI templates, and reads | ✅ | ✅ |
+| [Separate OAuth accounts at the same endpoint](docs/authentication.md#use-multiple-accounts) | ❌ | ✅ |
+| [OAuth credentials in the OS credential store](docs/authentication.md#sign-in-with-oauth) | ❌ | ✅ |
+| [DPoP-bound OAuth tokens](docs/authentication.md#use-dpop-bound-tokens) | ❌ | ✅ |
+| [Server prompts with preview before use](docs/commands.md#use-server-prompts) | ❌ | ✅ |
+| [Resource argument completion](docs/tool-reference.md#complete-resource-arguments) | ❌ | ✅ |
+| [Resource change watches](docs/commands.md#watch-resource-changes) | ❌ | ✅ |
+| [Server requests for user input (elicitation)](docs/behavior.md#server-requests-for-input) | ❌ | ✅ |
+| [Configuration imports with preview](docs/commands.md#import-server-definitions) | ❌ | ✅ |
+| OAuth clients requiring a client secret | ✅ | ❌ |
+| HTTP authentication with a provider's `/login` token | ✅ | ❌ |
+
+Both read the same `mcp.json` files, but OAuth credentials don't transfer between
+implementations. See
+[switching to built-in MCP](docs/behavior.md#pis-built-in-mcp-support).
+Built-in account isolation is tracked in
+[upstream issue #10252](https://github.com/earendil-works/pi/issues/10252).
+
 ## 🚀 Installation
 
 ```sh
