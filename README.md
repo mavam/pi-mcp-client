@@ -11,7 +11,7 @@ resources. You can also browse, preview, and use server-provided prompts.
 
 ## ⚖️ Do you need this extension?
 
-Comparison with [Pi's upstream `main`](https://github.com/earendil-works/pi/tree/main).
+Comparison with [Pi 1.0.0](https://github.com/earendil-works/pi/releases/tag/v1.0.0).
 
 | Feature | Built-in MCP | Pi MCP Client |
 | --- | :---: | :---: |
@@ -28,6 +28,7 @@ Comparison with [Pi's upstream `main`](https://github.com/earendil-works/pi/tree
 | [Server requests for user input (elicitation)](docs/behavior.md#server-requests-for-input) | ❌ | ✅ |
 | [Configuration imports with preview](docs/commands.md#import-server-definitions) | ❌ | ✅ |
 | OAuth clients requiring a client secret | ✅ | ❌ |
+| [OAuth authorization-server metadata override](https://github.com/earendil-works/pi/blob/v1.0.0/packages/coding-agent/docs/mcp.md#authenticate-with-oauth) | ✅ | ❌ |
 | HTTP authentication with a provider's `/login` token | ✅ | ❌ |
 
 Both read the same `mcp.json` files, but OAuth credentials don't transfer between
