@@ -11,7 +11,7 @@ resources. You can also browse, preview, and use server-provided prompts.
 
 ## ⚖️ Do you need this extension?
 
-Comparison with **Pi 0.99.2**. ✅ means supported; ❌ means not supported.
+Comparison with **Pi 0.99.2**.
 
 | Feature | Built-in MCP | Pi MCP Client |
 | --- | :---: | :---: |
