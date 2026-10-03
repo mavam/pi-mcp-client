@@ -1,0 +1,8 @@
+created: 2026-10-03
+title: MCP tools for Pi Durable
+intro: >-
+  Use MCP tools in Pi Durable with conversation-scoped activation and restart restoration.
+  Interrupted external calls are reported instead of replayed automatically.
+source:
+  mode: sync-stable-queue
+  previous_stable: v0.11.0
