@@ -97,6 +97,14 @@ Detailed guides:
 - [Troubleshooting](docs/troubleshooting.md): Error codes, recovery, and large
   results.
 
+## 🧬 Pi Durable
+
+Custom hosts can use the experimental `pi-mcp-client/durable` adapter for
+metadata discovery, native tool activation, resource reads, and template
+completion. It shares configuration and the MCP credential store with this
+extension. See [the durable host contract](docs/durable.md) for installation,
+restart ordering, trust, and UI requirements.
+
 ## 🧰 Requirements
 
 - Pi 0.99 or later.
